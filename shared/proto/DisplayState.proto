@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package jsm.core;
+
+option swift_prefix = "JSM";
+option java_package = "com.jsm.core.proto";
+option java_outer_classname = "DisplayStateProto";
+
+message VideoStreamMeta {
+  enum Codec {
+    H264 = 0;
+    HEVC = 1;
+  }
+  Codec codec = 1;
+  int32 target_fps = 2;
+  int32 estimated_bandwidth_kbps = 3;
+}
+
+message DevicePostureChanged {
+  enum Posture {
+    UNKNOWN = 0;
+    FOLDED = 1;      // Pantalla exterior normal
+    UNFOLDED = 2;    // Pantalla interna (Tablet)
+    HALF_OPENED = 3; // Flex mode / Laptop posture
+  }
+  Posture posture = 1;
+  float hinge_angle = 2; // Opcional, dependiendo de API OEM
+}
+
+message OrientationChanged {
+  enum Orientation {
+    PORTRAIT = 0;
+    LANDSCAPE = 1;
+  }
+  Orientation orientation = 1;
+  int32 width = 2;
+  int32 height = 3;
+}

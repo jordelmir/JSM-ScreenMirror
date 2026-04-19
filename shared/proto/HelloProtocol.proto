@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package jsm.core;
+
+// Opciones para lenguajes específicos
+option swift_prefix = "JSM";
+option java_package = "com.jsm.core.proto";
+option java_outer_classname = "HelloProtocolProto";
+
+// Enviado por el Android al escanear la red
+message SessionHello {
+  string device_id = 1;
+  string device_model = 2; // Ejemplo: "Honor Magic V2"
+  int32 priority_port = 3;
+}
+
+// Interfaz de estado del emparejamiento
+message PairingState {
+  enum State {
+    UNKNWOWN = 0;
+    DISCOVERED = 1;
+    NEGOTIATING = 2; // Negociando SDP/ICE WebRTC
+    CONNECTED = 3;   // P2P establecido
+    ERROR = 4;
+  }
+  State current_state = 1;
+  string error_message = 2;
+}

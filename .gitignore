@@ -1,0 +1,64 @@
+# ============================================
+# JSM Ecosystem — SECURITY SHIELD .gitignore
+# ============================================
+
+# === Secretos y Credenciales ===
+*.pem
+*.key
+*.p12
+*.cer
+*.mobileprovision
+*.keystore
+*.jks
+local.properties
+gradle.properties
+*.env
+.env.*
+
+# === Build Outputs ===
+.build/
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.app
+*.apk
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# === Gradle ===
+.gradle/
+*.hprof
+
+# === Swift Package Manager ===
+.swiftpm/
+Package.resolved
+
+# === IDE ===
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# === macOS ===
+.DS_Store
+._*
+Thumbs.db
+
+# === Logs y Temporales ===
+*.log
+/tmp/
+*.tmp
+
+# === Node (por si acaso) ===
+node_modules/
+
+# === Dependencias descargadas ===
+Pods/
+Carthage/
+
+# === Scripts de generación (no exponer synth interno) ===
+scripts/
