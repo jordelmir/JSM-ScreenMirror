@@ -2,8 +2,10 @@ import SwiftUI
 
 /// Panel UI flotante para la Mac que rige el Drag Handle y el Glassmorphism oscuro.
 struct HUDOverlayView: View {
-    // Gestor de posición arrastrable táctica
+    @EnvironmentObject var engine: RuntimeOrchestrator
     @State private var dragOffset = CGSize.zero
+    @State private var isLaserActive = false
+    @State private var isSpotlightActive = false
     
     var body: some View {
         HStack(spacing: 12) {
@@ -37,16 +39,46 @@ struct HUDOverlayView: View {
             
             // Botones de herramientas premium tácticas
             HStack(spacing: 20) {
-                ToolButton(icon: "record.circle", color: .red) {
-                    print("Start Record")
+                
+                if engine.isRecording {
+                    Text(engine.recordingSeconds < 3600 ? String(format: "%02d:%02d", engine.recordingSeconds / 60, engine.recordingSeconds % 60) : "REC")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 4)
+                        .transition(.opacity)
+                }
+
+                ToolButton(icon: engine.isRecording ? "stop.circle.fill" : "record.circle", color: .red) {
+                    engine.toggleRecording()
                 }
                 
-                ToolButton(icon: "pencil.and.outline", color: .cyan) {
-                    print("Lápiz Neón")
+                ToolButton(icon: "pencil.and.outline", color: isLaserActive ? .cyan : .gray) {
+                    isLaserActive.toggle()
+                    if isLaserActive { isSpotlightActive = false }
+                    SensoryFeedbackManager.shared.triggerHapticGeneric()
+                    print("Lápiz Neón Toggled: \(isLaserActive)")
                 }
                 
-                ToolButton(icon: "dot.radiowaves.up.forward", color: .green) {
-                    print("Spotlight Radar")
+                ToolButton(icon: "dot.radiowaves.up.forward", color: isSpotlightActive ? .green : .gray) {
+                    isSpotlightActive.toggle()
+                    if isSpotlightActive { isLaserActive = false }
+                    SensoryFeedbackManager.shared.triggerHapticGeneric()
+                    print("Spotlight Radar Toggled: \(isSpotlightActive)")
+                }
+
+                Divider()
+                    .background(Color.white.opacity(0.1))
+                    .frame(height: 18)
+
+                // El Switch de "Capacidad": Solo Mac vs Mac + Android
+                ToolButton(
+                    icon: (engine.metalCompositor?.isAndroidOverlayEnabled ?? true) ? "iphone.badge.plus" : "desktopcomputer", 
+                    color: (engine.metalCompositor?.isAndroidOverlayEnabled ?? true) ? .cyan : .gray
+                ) {
+                    let currentState = engine.metalCompositor?.isAndroidOverlayEnabled ?? true
+                    engine.metalCompositor?.isAndroidOverlayEnabled = !currentState
+                    SensoryFeedbackManager.shared.playMechanicalClick()
+                    print("Capacidad Cambiada: Is Android PIP Enabled = \(!currentState)")
                 }
             }
             .padding(.horizontal, 8)

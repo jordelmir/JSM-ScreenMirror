@@ -5,6 +5,7 @@ import WebRTC
 class RTCController: NSObject, ObservableObject {
     private var peerConnectionFactory: RTCPeerConnectionFactory
     private var peerConnection: RTCPeerConnection?
+    let videoSink = RTCVideoSink()
     
     // Configuración base P2P (Sin STUN en v1 para latencia pura LAN)
     private let rtcConfig: RTCConfiguration = {
@@ -33,6 +34,33 @@ class RTCController: NSObject, ObservableObject {
         peerConnection = peerConnectionFactory.peerConnection(with: rtcConfig, constraints: constraints, delegate: self)
         print("WebRTC PeerConnection creado. Preparado para recibir Offer/SDP.")
     }
+    
+    /// Recibe el SDP Offer crudo desde Bonjour Socket
+    func handleRemoteOffer(sdp: String, completion: @escaping (String) -> Void) {
+        let sessionDescription = RTCSessionDescription(type: .offer, sdp: sdp)
+        
+        peerConnection?.setRemoteDescription(sessionDescription) { [weak self] error in
+            guard error == nil else {
+                print("Error seteando Remote SDP: \(error!)")
+                return
+            }
+            self?.createAnswer(completion: completion)
+        }
+    }
+    
+    private func createAnswer(completion: @escaping (String) -> Void) {
+        let constraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
+        peerConnection?.answer(for: constraints) { [weak self] sdp, error in
+            guard let sdp = sdp, error == nil else { return }
+            
+            self?.peerConnection?.setLocalDescription(sdp) { error in
+                if error == nil {
+                    // Exportamos la espuesta al Socket Bonjour
+                    completion(sdp.sdp)
+                }
+            }
+        }
+    }
 }
 
 extension RTCController: RTCPeerConnectionDelegate {
@@ -40,15 +68,10 @@ extension RTCController: RTCPeerConnectionDelegate {
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
         // [Crítico]: WebRTC ejecuta esto en su hilo C++ worker interno (Signaling Thread)
-        // Despachamos a una cola de renderizado dedicada para procesar hardware bytes
-        DispatchQueue.global(qos: .userInteractive).async {
-            print("Track H.265/H.264 recibido remotamente de Android.")
-            guard let videoTrack = stream.videoTracks.first else { return }
-            
-            // Aquí transferiremos el RTCVideoTrack a nuestro lienzo de Metal.
-            // Para actualizar estados de UI (ej: isConnected), obligatoriamente saltamos a MainActor
-            Task { @MainActor in
-                // Ejemplo: HUDOverlayView state update
+        DispatchQueue.main.async {
+            print("Track de video inyectado desde Android.")
+            if let videoTrack = stream.videoTracks.first {
+                videoTrack.add(self.videoSink)
             }
         }
     }
@@ -63,5 +86,24 @@ extension RTCController: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
         print("DataChannel P2P abierto para metadatos (Orientation, Fold State)")
+        dataChannel.delegate = self
+    }
+}
+
+extension RTCController: RTCDataChannelDelegate {
+    func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
+    
+    func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+        guard let message = String(data: buffer.data, encoding: .utf8) else { return }
+        print("DataChannel Command: \(message)")
+        
+        // V1: Parser directo para mutar Layout PIP de Honor Magic V2 en Mac Director
+        Task { @MainActor in
+            if message == "FOLD_CLOSED" {
+                // Notificar al LayoutEngine (via EventBus o Delegate)
+            } else if message == "FOLD_OPENED" {
+                // Expandir PIP Android a Tablet
+            }
+        }
     }
 }

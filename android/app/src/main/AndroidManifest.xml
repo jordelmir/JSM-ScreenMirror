@@ -12,7 +12,8 @@
 
     <application
         android:allowBackup="true"
-        android:label="JSM"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Elysium Vanguard"
         android:supportsRtl="true"
         android:theme="@style/Theme.JSM">
         

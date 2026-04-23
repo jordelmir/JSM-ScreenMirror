@@ -48,14 +48,54 @@ class AudioMixer: ObservableObject {
         }
     }
     
-    /// Este método debe ser llamado desde `ScreenCaptureManager.swift` cuando
-    /// emita un CMSampleBuffer de audio del sistema (Type: .audio)
     func injectSystemAudio(sampleBuffer: CMSampleBuffer) {
-        print("System Audio Frame inyectado al motor de mezcla.")
+        // En V1 extraemos de CMSampleBuffer a AVAudioPCMBuffer y agendamos en systemAudioNode
+        // Omitimos la implementación de desembalaje para mantener la arquitectura limpia (requiere CMAudioFormatDescription)
     }
     
-    // Método Factory interno stub para crear el sample con PTS de ancla.
+    // Método Factory interno que convierte PCM a CMSampleBuffer para AVAssetWriter
     private func pcmBufferToSampleBuffer(_ pcmBuffer: AVAudioPCMBuffer, pts: CMTime) -> CMSampleBuffer? {
-        return nil
+        var status: OSStatus = noErr
+        var formatDescription: CMAudioFormatDescription? = nil
+        
+        status = CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                                asbd: pcmBuffer.format.streamDescription,
+                                                layoutSize: 0,
+                                                layout: nil,
+                                                magicCookieSize: 0,
+                                                magicCookie: nil,
+                                                extensions: nil,
+                                                formatDescriptionOut: &formatDescription)
+        
+        guard status == noErr, let formatDesc = formatDescription else { return nil }
+        
+        var sampleBuffer: CMSampleBuffer?
+        var timing = CMSampleTimingInfo(duration: CMTimeMake(value: 1, timescale: Int32(pcmBuffer.format.sampleRate)),
+                                        presentationTimeStamp: pts,
+                                        decodeTimeStamp: .invalid)
+        
+        status = CMSampleBufferCreate(allocator: kCFAllocatorDefault,
+                                      dataBuffer: nil,
+                                      dataReady: false,
+                                      makeDataReadyCallback: nil,
+                                      refcon: nil,
+                                      formatDescription: formatDesc,
+                                      sampleCount: CMItemCount(pcmBuffer.frameLength),
+                                      sampleTimingEntryCount: 1,
+                                      sampleTimingArray: &timing,
+                                      sampleSizeEntryCount: 0,
+                                      sampleSizeArray: nil,
+                                      sampleBufferOut: &sampleBuffer)
+        
+        guard status == noErr, let buffer = sampleBuffer else { return nil }
+        
+        // Asignar los datos del buffer PCM (requiere punteros AudioBufferList)
+        status = CMSampleBufferSetDataBufferFromAudioBufferList(buffer,
+                                                                blockBufferAllocator: kCFAllocatorDefault,
+                                                                blockBufferMemoryAllocator: kCFAllocatorDefault,
+                                                                flags: 0,
+                                                                bufferList: pcmBuffer.audioBufferList)
+        
+        return status == noErr ? buffer : nil
     }
 }

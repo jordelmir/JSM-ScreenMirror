@@ -7,33 +7,39 @@ class AVAssetRecorder {
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var audioInput: AVAssetWriterInput?
     
     private var isRecording = false
     private var sessionStartTime: CMTime = .zero
+    @Published var frameCount: Int = 0
+    @Published var lastError: String? = nil
+    @Published var lastErrorCode: String? = nil
     
-    func startRecording(outputURL: URL) throws {
+    func startRecording(outputURL: URL, size: CGSize, bitrate: Int = 16_000_000) throws {
         assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         
-        // Settings de Video: 1440p (V1 Default) | HEVC H.265 para compresión premium
+        // Settings de Video: HEVC (H.265) con bitrate adaptativo por resolución
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.hevc,
-            AVVideoWidthKey: 2560,
-            AVVideoHeightKey: 1440,
+            AVVideoWidthKey: Int(size.width),
+            AVVideoHeightKey: Int(size.height),
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 18_000_000, // 18 Mbps
-                AVVideoProfileLevelKey: "HEVC_Main_AutoLevel" as String,
-                AVVideoExpectedSourceFrameRateKey: 60
+                AVVideoAverageBitRateKey: bitrate,
+                AVVideoExpectedSourceFrameRateKey: 60,
+                AVVideoMaxKeyFrameIntervalKey: 120,
+                AVVideoMaxKeyFrameIntervalDurationKey: 2.0
             ]
         ]
         
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        videoInput?.expectsMediaDataInRealTime = true // Crítico para grabar pantallas sin desincronización
+        videoInput?.expectsMediaDataInRealTime = true
         
         let sourcePixelBufferAttributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-            kCVPixelBufferWidthKey as String: 2560,
-            kCVPixelBufferHeightKey as String: 1440,
-            kCVPixelBufferMetalCompatibilityKey as String: true
+            kCVPixelBufferWidthKey as String: Int(size.width),
+            kCVPixelBufferHeightKey as String: Int(size.height),
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:]
         ]
         
         pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
@@ -41,13 +47,39 @@ class AVAssetRecorder {
             sourcePixelBufferAttributes: sourcePixelBufferAttributes
         )
         
-        if let input = videoInput, assetWriter!.canAdd(input) {
-            assetWriter!.add(input)
+        if assetWriter?.canAdd(videoInput!) == true {
+            assetWriter?.add(videoInput!)
+        }
+        
+        // Settings de Audio: AAC-LC 256kbps 48kHz Estéreo
+        let audioSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 48000,
+            AVNumberOfChannelsKey: 2,
+            AVEncoderBitRateKey: 256000
+        ]
+        
+        audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+        audioInput?.expectsMediaDataInRealTime = true
+        
+        if assetWriter?.canAdd(audioInput!) == true {
+            assetWriter?.add(audioInput!)
         }
         
         assetWriter?.startWriting()
-        assetWriter?.startSession(atSourceTime: CMTime.zero)
+        
+        if assetWriter?.status == .failed {
+            let err = assetWriter?.error as NSError?
+            lastErrorCode = "\(err?.code ?? -1)"
+            throw assetWriter?.error ?? NSError(domain: "AVAssetRecorder", code: -1)
+        }
+        
         isRecording = true
+        sessionStartTime = .zero
+        frameCount = 0
+        lastError = nil
+        lastErrorCode = nil
+        print("AVAssetRecorder: HEVC encoder ready at \(Int(size.width))x\(Int(size.height)) @ \(bitrate/1_000_000)Mbps")
     }
     
     /// Consume la textura resultante que sale del pipeline `MetalCompositor` y la empaqueta.
@@ -59,7 +91,14 @@ class AVAssetRecorder {
             assetWriter?.startSession(atSourceTime: time)
         }
         
-        pixelBufferAdaptor?.append(pixelBuffer, withPresentationTime: time)
+        if pixelBufferAdaptor?.append(pixelBuffer, withPresentationTime: time) == true {
+            frameCount += 1
+        } else {
+            let errorMsg = assetWriter?.error?.localizedDescription ?? "Status: \(assetWriter?.status.rawValue ?? -1)"
+            let debugInfo = "Append Error: \(errorMsg)\n"
+            try? debugInfo.write(to: URL(fileURLWithPath: "/tmp/ev_error.log"), atomically: true, encoding: .utf8)
+            lastError = errorMsg
+        }
     }
     
     /// Consume Audio Mixto emparejado desde AudioMixer y encola si el sessionStart existe.
@@ -71,10 +110,9 @@ class AVAssetRecorder {
         // No pasamos audio cuyo reloj físico ocurrió ANTES del arranque nominal del video de la sesión
         guard sessionStartTime != .zero, pts >= sessionStartTime else { return }
         
-        // (Asumiendo que generas un AVAssetWriterInput para Audio previamente inicializado)
-        // if audioInput?.isReadyForMoreMediaData == true {
-        //    audioInput?.append(sampleBuffer)
-        // }
+        if audioInput?.isReadyForMoreMediaData == true {
+           audioInput?.append(sampleBuffer)
+        }
     }
     
     func stopRecording(completion: @escaping (URL?) -> Void) {
@@ -82,6 +120,7 @@ class AVAssetRecorder {
         isRecording = false
         
         videoInput?.markAsFinished()
+        audioInput?.markAsFinished()
         writer.finishWriting {
             completion(writer.outputURL)
         }

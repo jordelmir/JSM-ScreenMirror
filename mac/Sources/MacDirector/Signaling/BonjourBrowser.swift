@@ -22,7 +22,7 @@ class BonjourBrowser: ObservableObject {
         
         browser?.browseResultsChangedHandler = { [weak self] results, changes in
             for result in results {
-                if case let .service(name, type, domain, interface) = result.endpoint {
+                if case let .service(name, _, _, interface) = result.endpoint {
                     print("Found service: \(name), interface: \(String(describing: interface))")
                     // Aquí resolveremos el Endpoint a una IP directa para inyectarlo al RTC
                     self?.resolveEndpoint(result.endpoint)

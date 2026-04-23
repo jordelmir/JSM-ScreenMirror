@@ -13,13 +13,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.content.Context
+import android.media.projection.MediaProjectionManager
 import com.jsm.core.sensory.SensoryFeedbackManager
 import com.jsm.core.signaling.NsdBroadcaster
+import com.jsm.core.signaling.SignalingServer
+import com.jsm.core.webrtc.CaptureForegroundService
+import com.jsm.core.webrtc.RTCClient
+import org.webrtc.IceCandidate
+import org.webrtc.MediaStream
+import org.webrtc.PeerConnection
+import org.webrtc.SessionDescription
+import org.webrtc.DataChannel
+import org.webrtc.RtpReceiver
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var nsdBroadcaster: NsdBroadcaster
     private lateinit var sensoryFeedback: SensoryFeedbackManager
+    private var rtcClient: RTCClient? = null
+    private var signalingServer: SignalingServer? = null
+    
+    private val RECORD_REQUEST_CODE = 999
+    private var isBroadcastingState = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,9 +56,56 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startMediaProjectionRequest() {
+        val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        startActivityForResult(mediaProjectionManager.createScreenCaptureIntent(), RECORD_REQUEST_CODE)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == RECORD_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
+            bootWebRTC(data)
+        } else {
+            isBroadcastingState.value = false
+        }
+    }
+
+    private fun bootWebRTC(projectionData: Intent) {
+        val pcObserver = object : PeerConnection.Observer {
+            override fun onIceCandidate(candidate: IceCandidate) {}
+            override fun onAddStream(stream: MediaStream) {}
+            override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+            override fun onIceConnectionReceivingChange(p0: Boolean) {}
+            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+            override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
+            override fun onRemoveStream(p0: MediaStream?) {}
+            override fun onDataChannel(p0: DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
+        }
+
+        rtcClient = RTCClient(this, pcObserver)
+        rtcClient?.startStreaming(projectionData)
+
+        signalingServer = SignalingServer(
+            port = 9999,
+            onOfferRequested = { sendOffer ->
+                rtcClient?.createOffer { sdp ->
+                    sendOffer(sdp.description)
+                }
+            },
+            onAnswerReceived = { sdpAnswer ->
+                rtcClient?.setRemoteDescription(SessionDescription(SessionDescription.Type.ANSWER, sdpAnswer))
+                sensoryFeedback.triggerPairingSuccess()
+            }
+        )
+        signalingServer?.start()
+    }
+
     @Composable
     fun CyberPunkControlPanel() {
-        var isBroadcasting by remember { mutableStateOf(false) }
+        var isBroadcasting by isBroadcastingState
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -49,8 +113,8 @@ class MainActivity : ComponentActivity() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "JSM Magic Link",
-                color = Color(0xFF00E5FF), // Cyan Neón
+                text = "Elysium Vanguard Link",
+                color = Color(0xFF00E5FF),
                 style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold)
             )
             
@@ -61,9 +125,17 @@ class MainActivity : ComponentActivity() {
                     isBroadcasting = !isBroadcasting
                     if (isBroadcasting) {
                         nsdBroadcaster.startBroadcasting(9999)
-                        sensoryFeedback.triggerPairingSuccess()
+                        
+                        // Encender Inmunidad de Sistema Android 14+
+                        val serviceIntent = Intent(this@MainActivity, CaptureForegroundService::class.java)
+                        startForegroundService(serviceIntent)
+                        
+                        // Solicitar captura de pantalla
+                        startMediaProjectionRequest()
                     } else {
                         nsdBroadcaster.stopBroadcasting()
+                        signalingServer?.stop()
+                        stopService(Intent(this@MainActivity, CaptureForegroundService::class.java))
                     }
                 },
                 shape = RoundedCornerShape(12.dp),

@@ -5,23 +5,23 @@ struct MacDirectorApp: App {
     @StateObject private var engine = RuntimeOrchestrator()
 
     var body: some Scene {
-        // Ventana principal purasangre Metal sin los cromados de sistema
         WindowGroup {
             ZStack {
-                CompositorCanvasView(mtkView: engine.mtkView)
-                    .ignoresSafeArea()
+                DashboardView()
+                    .environmentObject(engine)
                 
-                // La UI Cyberpunk Flotante
-                VStack {
-                    Spacer()
-                    HUDOverlayView()
-                        .padding(.bottom, 20)
+                // Si el motor arrancó, mostrar HUD flotante en la parte inferior
+                if engine.isBooted {
+                    VStack {
+                        Spacer()
+                        HUDOverlayView()
+                            .environmentObject(engine)
+                            .padding(.bottom, 20)
+                    }
                 }
-            }
-            .onAppear {
-                engine.bootEngine()
             }
         }
         .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
     }
 }
