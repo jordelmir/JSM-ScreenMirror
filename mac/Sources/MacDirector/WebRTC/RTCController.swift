@@ -50,7 +50,13 @@ class RTCController: NSObject, ObservableObject {
     
     /// Recibe el SDP Offer del Android y genera la Answer
     func handleRemoteOffer(sdp: String, completion: @escaping (String) -> Void) {
-        let sessionDescription = RTCSessionDescription(type: .offer, sdp: sdp)
+        // [Crítico]: Forzar H264 para que el engine en Mac use aceleración por hardware (VideoToolbox)
+        // y nos devuelva RTCCVPixelBuffer en lugar de RTCI420Buffer.
+        var modifiedSdp = sdp
+            .replacingOccurrences(of: "VP8", with: "DISABLE_VP8")
+            .replacingOccurrences(of: "VP9", with: "DISABLE_VP9")
+        
+        let sessionDescription = RTCSessionDescription(type: .offer, sdp: modifiedSdp)
         
         peerConnection?.setRemoteDescription(sessionDescription) { [weak self] error in
             guard error == nil else {

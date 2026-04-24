@@ -459,7 +459,7 @@ class MainActivity : ComponentActivity() {
                                     else -> "❓"
                                 }, Color(0xFFE040FB))
                                 TelemetryItem("STREAM", "1080p", Color(0xFF00E5FF))
-                                TelemetryItem("CODEC", "VP8/HW", Color(0xFF00E676))
+                                TelemetryItem("CODEC", "H264/HW", Color(0xFF00E676))
                             }
                         }
                     }
