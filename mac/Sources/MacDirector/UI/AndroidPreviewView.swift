@@ -91,9 +91,6 @@ private enum PhoneDimensions {
     static let cornerRadiusFraction: CGFloat = 0.06
     // Bezel thickness (fraction of width)
     static let bezelFraction: CGFloat = 0.025
-    // Max width constraints per posture (in points)
-    static let maxFoldedWidth: CGFloat = 220
-    static let maxUnfoldedWidth: CGFloat = 380
 }
 
 // MARK: - Device Posture Enum for Preview
@@ -288,7 +285,7 @@ struct AndroidPreviewWindow: View {
     @State private var breathePhase: CGFloat = 0
     
     // Adaptive sizing
-    private let bezelPadding: CGFloat = 8
+    private let bezelPadding: CGFloat = 6
     
     var body: some View {
         ZStack {
@@ -314,8 +311,8 @@ struct AndroidPreviewWindow: View {
                 waitingView
             }
         }
-        .frame(minWidth: 350, idealWidth: 420, maxWidth: 600,
-               minHeight: 500, idealHeight: 750, maxHeight: 900)
+        .frame(minWidth: 280, idealWidth: 360, maxWidth: 550,
+               minHeight: 500, idealHeight: 720, maxHeight: 880)
         .onReceive(engine.rtcController.$latestPixelBuffer) { pb in
             self.currentFrame = pb
         }
@@ -340,17 +337,14 @@ struct AndroidPreviewWindow: View {
     
     private var phoneDeviceView: some View {
         GeometryReader { geo in
-            let availW = geo.size.width - 40  // margin
-            let availH = geo.size.height - 80 // margin + status bar
+            let availW = geo.size.width - 24  // tight side margins
+            let availH = geo.size.height - 60 // top/bottom for HUD
             let aspect = posture.aspectRatio
             
-            // Max width depends on posture: phone = compact, tablet = wider but capped
-            let maxW: CGFloat = posture == .folded ? PhoneDimensions.maxFoldedWidth : PhoneDimensions.maxUnfoldedWidth
-            
-            // Calculate phone size: fit within available space AND max constraints
+            // Phone fills ~92% of available space — it should DOMINATE the window
             let phoneW: CGFloat = {
                 let wFromH = availH / aspect
-                return min(min(wFromH, availW), maxW)
+                return min(wFromH, availW) * 0.92
             }()
             let phoneH = phoneW * aspect
             let cornerRadius = phoneW * PhoneDimensions.cornerRadiusFraction
