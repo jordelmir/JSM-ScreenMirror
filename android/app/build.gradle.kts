@@ -7,12 +7,28 @@ android {
     namespace = "com.jsm.core"
     compileSdk = 34
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../elysium-release.keystore")
+            storePassword = "ElysiumVanguard2026"
+            keyAlias = "elysium"
+            keyPassword = "ElysiumVanguard2026"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.jsm.core"
         minSdk = 31
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+        }
     }
 
     buildFeatures {
