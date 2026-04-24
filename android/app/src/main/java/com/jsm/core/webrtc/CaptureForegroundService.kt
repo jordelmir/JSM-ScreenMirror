@@ -39,8 +39,9 @@ class CaptureForegroundService : Service() {
         val notification = buildNotification()
         startForeground(NOTIFICATION_ID, notification)
         
-        // El servicio se queda corriendo para mantener ScreenCapturerHook vivo
-        return START_NOT_STICKY
+        // START_STICKY: Si Android mata el servicio, lo reinicia automáticamente
+        // Esto garantiza streaming ininterrumpido durante horas
+        return START_STICKY
     }
 
     private fun acquireLocks() {

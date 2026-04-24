@@ -48,22 +48,30 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "ElysiumMainActivity"
+        private const val RECORD_REQUEST_CODE = 999
+        
+        // ═══ PIPELINE INMORTAL ═══
+        // Estos objetos viven en static para sobrevivir la destrucción del Activity.
+        // Android puede matar y recrear el Activity libremente sin afectar el streaming.
+        private var rtcClient: RTCClient? = null
+        private var signalingServer: SignalingServer? = null
+        private var foldMonitorJob: Job? = null
+        
+        // Flag: solo detener el pipeline si el usuario lo pidió explícitamente
+        var userRequestedStop = false
+        
+        // Estado observable (static para persistir entre recreaciones del Activity)
+        val isBroadcastingState = mutableStateOf(false)
+        val connectionState = mutableStateOf("IDLE")
+        val peerState = mutableStateOf("—")
+        val lastFoldPosture = mutableStateOf("UNKNOWN")
+        
+        fun isPipelineAlive(): Boolean = rtcClient != null && signalingServer != null
     }
 
     private lateinit var nsdBroadcaster: NsdBroadcaster
     private lateinit var sensoryFeedback: SensoryFeedbackManager
     private lateinit var foldStateListener: FoldStateListener
-    private var rtcClient: RTCClient? = null
-    private var signalingServer: SignalingServer? = null
-    private var foldMonitorJob: Job? = null
-
-    private val RECORD_REQUEST_CODE = 999
-
-    // ─── Observable State ───
-    private var isBroadcastingState = mutableStateOf(false)
-    private var connectionState = mutableStateOf("IDLE")
-    private var peerState = mutableStateOf("—")
-    private var lastFoldPosture = mutableStateOf("UNKNOWN")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,6 +89,11 @@ class MainActivity : ComponentActivity() {
                     ElysiumControlPanel()
                 }
             }
+        }
+        
+        // Si el pipeline ya está vivo (Activity fue recreado), reconectar la UI
+        if (isPipelineAlive()) {
+            Log.d(TAG, "♻️ Activity recreado — pipeline ya está activo, reconectando UI")
         }
     }
 
@@ -103,6 +116,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bootFullPipeline(projectionData: Intent) {
+        userRequestedStop = false  // Reset: nuevo pipeline activo
         connectionState.value = "INITIALIZING"
 
         val pcObserver = object : PeerConnection.Observer {
@@ -242,6 +256,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopPipeline() {
+        userRequestedStop = true
         foldMonitorJob?.cancel()
         foldMonitorJob = null
         nsdBroadcaster.stopBroadcasting()
@@ -252,6 +267,8 @@ class MainActivity : ComponentActivity() {
         stopService(Intent(this, CaptureForegroundService::class.java))
         connectionState.value = "IDLE"
         peerState.value = "—"
+        isBroadcastingState.value = false
+        Log.d(TAG, "🛑 Pipeline detenido por solicitud del usuario")
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -700,7 +717,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopPipeline()
+        // ╔═══════════════════════════════════════════════════════════╗
+        // ║ CRÍTICO: Solo matar el pipeline si el usuario lo pidió          ║
+        // ║ explícitamente. Android puede destruir el Activity en           ║
+        // ║ cualquier momento por gestión de memoria, y el streaming      ║
+        // ║ debe sobrevivir eso.                                          ║
+        // ╚═══════════════════════════════════════════════════════════╝
+        if (isFinishing && userRequestedStop) {
+            stopPipeline()
+            Log.d(TAG, "🟥 Activity finishing + user stop → pipeline killed")
+        } else {
+            Log.d(TAG, "♻️ Activity destroyed by system — pipeline SURVIVES")
+        }
     }
 }
 
