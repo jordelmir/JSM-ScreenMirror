@@ -2,7 +2,8 @@ import SwiftUI
 import WebRTC
 import AVFoundation
 
-/// Vista que usa AVSampleBufferDisplayLayer para renderizar video acelerado por hardware en macOS
+/// Vista que usa AVSampleBufferDisplayLayer para renderizar video NV12 en macOS.
+/// AVSampleBufferDisplayLayer soporta NV12 (BiPlanar) nativamente con aceleración GPU.
 struct AndroidPreviewView: NSViewRepresentable {
     var pixelBuffer: CVPixelBuffer?
     
@@ -12,22 +13,31 @@ struct AndroidPreviewView: NSViewRepresentable {
         init() {
             displayLayer.videoGravity = .resizeAspect
             displayLayer.backgroundColor = NSColor.black.cgColor
+            // Desactivar el control de timing — queremos render inmediato
+            displayLayer.preventsDisplaySleepDuringVideoPlayback = false
         }
         
         func enqueue(_ pixelBuffer: CVPixelBuffer) {
             var formatDesc: CMVideoFormatDescription?
-            CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: pixelBuffer, formatDescriptionOut: &formatDesc)
+            let fmtStatus = CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault,
+                imageBuffer: pixelBuffer,
+                formatDescriptionOut: &formatDesc
+            )
             
-            guard let fd = formatDesc else { return }
+            guard fmtStatus == noErr, let fd = formatDesc else {
+                print("❌ Preview: CMVideoFormatDescription failed: \(fmtStatus)")
+                return
+            }
             
             var sampleTiming = CMSampleTimingInfo(
                 duration: .invalid,
-                presentationTimeStamp: .invalid, // Ignore timing, display immediately
+                presentationTimeStamp: .invalid,
                 decodeTimeStamp: .invalid
             )
             
             var sampleBuffer: CMSampleBuffer?
-            CMSampleBufferCreateReadyWithImageBuffer(
+            let sbStatus = CMSampleBufferCreateReadyWithImageBuffer(
                 allocator: kCFAllocatorDefault,
                 imageBuffer: pixelBuffer,
                 formatDescription: fd,
@@ -35,25 +45,31 @@ struct AndroidPreviewView: NSViewRepresentable {
                 sampleBufferOut: &sampleBuffer
             )
             
-            if let sb = sampleBuffer {
-                // Set DisplayImmediately attachment
-                if let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true) as? [[CFString: Any]],
-                   !attachmentsArray.isEmpty {
-                    var dict = attachmentsArray[0]
-                    dict[kCMSampleAttachmentKey_DisplayImmediately] = true
-                    // CFArray properties mutability hack in Swift is annoying, easier way:
-                }
-                let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true)
-                if let attachments = attachments {
-                    let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
-                    CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-                }
-
-                if displayLayer.status == .failed {
-                    displayLayer.flush()
-                }
-                displayLayer.enqueue(sb)
+            guard sbStatus == noErr, let sb = sampleBuffer else {
+                print("❌ Preview: CMSampleBuffer creation failed: \(sbStatus)")
+                return
             }
+            
+            // Forzar display inmediato (sin esperar PTS)
+            let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true)
+            if let attachments = attachments {
+                let dict = unsafeBitCast(
+                    CFArrayGetValueAtIndex(attachments, 0),
+                    to: CFMutableDictionary.self
+                )
+                CFDictionarySetValue(
+                    dict,
+                    Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                    Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
+                )
+            }
+            
+            if displayLayer.status == .failed {
+                print("⚠️ Preview: DisplayLayer failed, flushing. Error: \(String(describing: displayLayer.error))")
+                displayLayer.flush()
+            }
+            
+            displayLayer.enqueue(sb)
         }
     }
     
@@ -105,4 +121,3 @@ struct AndroidPreviewWindow: View {
         }
     }
 }
-
