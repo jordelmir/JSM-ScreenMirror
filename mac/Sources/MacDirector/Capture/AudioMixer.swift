@@ -37,6 +37,10 @@ class AudioMixer: ObservableObject {
         let mainMixer = engine.mainMixerNode
         let outputFormat = mainMixer.outputFormat(forBus: 0)
         
+        // MUTE the physical output to prevent infinite feedback loops.
+        // The tap is installed on the bus, so it will still receive the audio before output.
+        mainMixer.outputVolume = 0.0
+        
         // Conexión inicial del nodo de sistema al mixer (se reconecta si el formato cambia)
         engine.connect(systemAudioNode, to: mainMixer, format: outputFormat)
         
