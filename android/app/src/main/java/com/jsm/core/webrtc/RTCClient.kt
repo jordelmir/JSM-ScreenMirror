@@ -53,8 +53,11 @@ class RTCClient(
         // Configuración LAN-first: sin servidores STUN/TURN para latencia mínima
         val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-            // Forzar candidatos host para LAN pura
             candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.LOW_COST
+            // Mantener ICE vivo: re-gather continuamente en vez de parar
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            // Check ICE cada 1 segundo para detección rápida de problemas
+            iceCheckMinInterval = 1000
         }
 
         // Wrapper del observer que intercepta ICE candidates
@@ -96,7 +99,10 @@ class RTCClient(
             override fun onStateChange() {
                 Log.d(TAG, "DataChannel state: ${dataChannel?.state()}")
             }
-            override fun onMessage(buffer: DataChannel.Buffer) {}
+            override fun onMessage(buffer: DataChannel.Buffer) {
+                val msg = String(buffer.data.array(), Charsets.UTF_8)
+                handleDataChannelMessage(msg)
+            }
         })
         Log.d(TAG, "DataChannel 'jsm_meta' created")
 
@@ -188,6 +194,46 @@ class RTCClient(
     fun adaptCaptureResolution(width: Int, height: Int, fps: Int) {
         screenCapturerHook.changeCaptureFormat(width, height, fps)
         Log.d(TAG, "📐 Capture resolution adapted: ${width}x${height}@${fps}fps")
+    }
+
+    // ═══ REMOTE CONTROL: Procesar comandos de touch del Mac ═══
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    
+    private fun handleDataChannelMessage(message: String) {
+        val parts = message.split(":")
+        when (parts.firstOrNull()) {
+            "TOUCH" -> {
+                // TOUCH:0.5000:0.3000 → tap en el centro-arriba
+                if (parts.size >= 3) {
+                    val x = parts[1].toFloatOrNull() ?: return
+                    val y = parts[2].toFloatOrNull() ?: return
+                    lastTouchX = x
+                    lastTouchY = y
+                    com.jsm.core.input.TouchInjectorService.injectTap(x, y)
+                    Log.d(TAG, "👆 Remote tap: ($x, $y)")
+                }
+            }
+            "TOUCH_MOVE" -> {
+                // TOUCH_MOVE:0.6000:0.4000 → swipe hacia esa posición
+                if (parts.size >= 3) {
+                    val toX = parts[1].toFloatOrNull() ?: return
+                    val toY = parts[2].toFloatOrNull() ?: return
+                    com.jsm.core.input.TouchInjectorService.injectSwipe(
+                        lastTouchX, lastTouchY, toX, toY, 200
+                    )
+                    lastTouchX = toX
+                    lastTouchY = toY
+                }
+            }
+            "TOUCH_UP" -> {
+                // Touch released
+                Log.d(TAG, "👆 Remote touch up")
+            }
+            else -> {
+                Log.d(TAG, "DataChannel ← $message")
+            }
+        }
     }
 
     fun dispose() {

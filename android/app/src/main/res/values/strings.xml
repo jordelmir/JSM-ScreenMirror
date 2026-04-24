@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Elysium Vanguard</string>
+    <string name="touch_injector_description">Permite controlar tu dispositivo Android de forma remota desde tu Mac. Elysium Vanguard usa este servicio para traducir clicks del Mac en toques en tu pantalla Android.</string>
+</resources>

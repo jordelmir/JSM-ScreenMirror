@@ -110,10 +110,40 @@ struct AndroidPreviewWindow: View {
             if engine.rtcController.isP2PConnected {
                 // ── VIDEO: Llena absolutamente todo ──
                 if let frame = currentFrame {
-                    AndroidPreviewView(pixelBuffer: frame)
-                        // El video ocupa CADA pixel de la ventana
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .edgesIgnoringSafeArea(.all)
+                    GeometryReader { geo in
+                        AndroidPreviewView(pixelBuffer: frame)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .edgesIgnoringSafeArea(.all)
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onEnded { value in
+                                        // Normalizar coordenadas a 0.0-1.0
+                                        let normX = value.location.x / geo.size.width
+                                        let normY = value.location.y / geo.size.height
+                                        let clampedX = min(max(normX, 0), 1)
+                                        let clampedY = min(max(normY, 0), 1)
+                                        
+                                        // Enviar tap al Android via DataChannel
+                                        let msg = String(format: "TOUCH:%.4f:%.4f", clampedX, clampedY)
+                                        engine.rtcController.sendDataChannelMessage(msg)
+                                        print("👆 Touch sent: \(msg)")
+                                    }
+                            )
+                            // Swipe/drag support
+                            .gesture(
+                                DragGesture(minimumDistance: 10)
+                                    .onChanged { value in
+                                        let normX = value.location.x / geo.size.width
+                                        let normY = value.location.y / geo.size.height
+                                        let msg = String(format: "TOUCH_MOVE:%.4f:%.4f", 
+                                            min(max(normX, 0), 1), min(max(normY, 0), 1))
+                                        engine.rtcController.sendDataChannelMessage(msg)
+                                    }
+                                    .onEnded { value in
+                                        engine.rtcController.sendDataChannelMessage("TOUCH_UP")
+                                    }
+                            )
+                    }
                 } else {
                     connectingIndicator
                 }

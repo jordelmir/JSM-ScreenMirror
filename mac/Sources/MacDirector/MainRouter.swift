@@ -150,6 +150,36 @@ class RuntimeOrchestrator: ObservableObject {
                 }
             }
         }.store(in: &cancellables)
+        
+        // 7. ── AUTO-RECONNECT: cuando ICE muere, reconectar automáticamente ──
+        rtcController.onConnectionLost = { [weak self] in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.androidConnectionState = "RECONNECTING"
+                print("🔄 ICE connection lost — auto-reconnecting in 3s...")
+                
+                // Esperar 3 segundos antes de reconectar
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                
+                // Recrear PeerConnection para nueva negociación
+                self.rtcController.reconnectP2P()
+                
+                // Re-vincular video sink
+                self.rtcController.videoSink.onFrameReceived = { [weak self] pixelBuffer in
+                    self?.metalCompositor?.updateAndroidStream(pixelBuffer: pixelBuffer)
+                    DispatchQueue.main.async {
+                        self?.rtcController.latestPixelBuffer = pixelBuffer
+                    }
+                }
+                
+                // Reconectar signaling (que dispara nueva Offer del Android)
+                if let host = self.bonjourBrowser.discoveredHost,
+                   let port = self.bonjourBrowser.discoveredPort {
+                    self.signalingClient.connect(to: host, port: port)
+                    print("🔄 Signaling reconnected — waiting for new Offer...")
+                }
+            }
+        }
     }
     
     /// Procesa mensajes del DataChannel del Android

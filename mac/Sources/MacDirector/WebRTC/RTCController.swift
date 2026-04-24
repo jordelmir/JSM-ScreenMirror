@@ -20,6 +20,9 @@ class RTCController: NSObject, ObservableObject {
     // DataChannel callback para metadatos del Android (fold state, orientación)
     var onDataChannelMessage: ((String) -> Void)?
     
+    // Callback para auto-reconnect cuando ICE falla
+    var onConnectionLost: (() -> Void)?
+    
     // Configuración base P2P (Sin STUN en v1 para latencia pura LAN)
     private let rtcConfig: RTCConfiguration = {
         let config = RTCConfiguration()
@@ -98,11 +101,38 @@ class RTCController: NSObject, ObservableObject {
         }
     }
     
+    /// Limpieza del PeerConnection actual para poder reconectar.
+    func disposePeerConnection() {
+        peerConnection?.close()
+        peerConnection = nil
+        DispatchQueue.main.async {
+            self.isP2PConnected = false
+            self.currentVideoTrack = nil
+        }
+        print("RTCController: PeerConnection disposed for reconnection")
+    }
+    
+    /// Re-crea el PeerConnection para una nueva negociación SDP.
+    func reconnectP2P() {
+        disposePeerConnection()
+        createPeerConnection()
+        print("RTCController: ♻️ PeerConnection recreado — listo para nueva Offer")
+    }
+    
+    /// Envía un mensaje por DataChannel al Android (para touch events)
+    func sendDataChannelMessage(_ message: String) {
+        guard let data = message.data(using: .utf8) else { return }
+        let buffer = RTCDataBuffer(data: data, isBinary: false)
+        dataChannel?.sendData(buffer)
+    }
+    
+    private var dataChannel: RTCDataChannel?
+    
     /// Limpieza completa de recursos WebRTC.
-    /// Debe llamarse antes de liberar la instancia.
     func dispose() {
         peerConnection?.close()
         peerConnection = nil
+        dataChannel = nil
         onLocalIceCandidate = nil
         onDataChannelMessage = nil
         RTCCleanupSSL()
@@ -154,6 +184,11 @@ extension RTCController: RTCPeerConnectionDelegate {
         DispatchQueue.main.async {
             self.iceConnectionState = newState
             self.isP2PConnected = (newState == .connected || newState == .completed)
+            
+            // Notificar para auto-reconnect
+            if newState == .failed || newState == .disconnected {
+                self.onConnectionLost?()
+            }
         }
     }
     
@@ -178,6 +213,7 @@ extension RTCController: RTCPeerConnectionDelegate {
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
         print("✅ DataChannel P2P abierto: '\(dataChannel.label)' (id: \(dataChannel.channelId))")
+        self.dataChannel = dataChannel
         dataChannel.delegate = self
     }
 }
