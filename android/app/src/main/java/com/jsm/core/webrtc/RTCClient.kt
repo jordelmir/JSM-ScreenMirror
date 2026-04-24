@@ -32,8 +32,12 @@ class RTCClient(
 
     private fun initPeerConnectionFactory(context: Context) {
         val options = PeerConnectionFactory.InitializationOptions.builder(context)
-            .setEnableInternalTracer(true)
-            .setFieldTrials("WebRTC-H264HighProfile/Enabled/")
+            .setEnableInternalTracer(false) // Desactivar tracer en producción para rendimiento
+            .setFieldTrials(
+                "WebRTC-H264HighProfile/Enabled/" +
+                "WebRTC-H264Simulcast/Enabled/" +
+                "WebRTC-Video-Pacing/Enabled/"
+            )
             .createInitializationOptions()
         PeerConnectionFactory.initialize(options)
     }

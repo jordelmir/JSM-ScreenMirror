@@ -140,12 +140,23 @@ class MainActivity : ComponentActivity() {
                         connectionState.value = "STREAMING"
                         sensoryFeedback.triggerPairingSuccess()
                         startFoldStateMonitoring()
+                        // Enviar dimensiones inmediatamente para que Mac ajuste ventana
+                        sendCurrentOrientation()
                     }
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        connectionState.value = "DISCONNECTED"
+                        connectionState.value = "RECONNECTING"
+                        // Auto-reconexión: WebRTC re-intenta ICE automáticamente
+                        // Si no se recupera en 5s, marcamos como desconectado
+                        android.os.Handler(mainLooper).postDelayed({
+                            if (connectionState.value == "RECONNECTING") {
+                                Log.d(TAG, "🔄 Auto-reconnect timeout — waiting for Mac")
+                                connectionState.value = "WAITING_FOR_MAC"
+                            }
+                        }, 5000)
                     }
                     PeerConnection.IceConnectionState.FAILED -> {
                         connectionState.value = "FAILED"
+                        Log.e(TAG, "❌ ICE failed — connection lost")
                     }
                     else -> {}
                 }
@@ -679,6 +690,7 @@ class MainActivity : ComponentActivity() {
     private fun connectionColor(state: String): Color = when (state) {
         "STREAMING" -> Color(0xFF00E676)
         "NEGOTIATING", "WAITING_FOR_MAC" -> Color(0xFF00E5FF)
+        "RECONNECTING" -> Color(0xFFFFD600)
         "INITIALIZING" -> Color(0xFFFFAB00)
         "FAILED", "PERMISSION_DENIED" -> Color(0xFFFF1744)
         "MAC_DISCONNECTED" -> Color(0xFFFF6D00)
