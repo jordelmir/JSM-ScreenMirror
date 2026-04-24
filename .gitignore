@@ -1,64 +1,107 @@
 # ============================================
-# JSM Ecosystem — SECURITY SHIELD .gitignore
+# ELYSIUM VANGUARD — Production .gitignore
 # ============================================
 
-# === Secretos y Credenciales ===
+# ══════════════════════════════════════════════
+#  SECRETS & CREDENTIALS — CRITICAL PROTECTION
+# ══════════════════════════════════════════════
 *.pem
 *.key
 *.p12
+*.p8
 *.cer
+*.der
+*.crt
+*.pfx
 *.mobileprovision
 *.keystore
 *.jks
+signing.properties
+keystore.properties
 local.properties
 gradle.properties
+google-services.json
+GoogleService-Info.plist
 *.env
+.env
 .env.*
+.env.local
+.env.production
+.secret
+*.secret
+secrets/
+credentials/
+api_keys.txt
 
-# === Build Outputs ===
+# ══════════════════════════════════════════════
+#  BUILD OUTPUTS
+# ══════════════════════════════════════════════
+# macOS
 .build/
-build/
 DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
-*.app
-*.apk
-*.ipa
 *.dSYM
 *.dSYM.zip
+*.app
 
-# === Gradle ===
-.gradle/
+# Android
+build/
+*.apk
+*.aab
+*.aar
 *.hprof
 
-# === Swift Package Manager ===
+# ══════════════════════════════════════════════
+#  GRADLE
+# ══════════════════════════════════════════════
+.gradle/
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# ══════════════════════════════════════════════
+#  SWIFT PACKAGE MANAGER
+# ══════════════════════════════════════════════
 .swiftpm/
 Package.resolved
 
-# === IDE ===
+# ══════════════════════════════════════════════
+#  IDE FILES
+# ══════════════════════════════════════════════
 .idea/
 *.iml
 .vscode/
 *.swp
 *.swo
 *~
+*.code-workspace
 
-# === macOS ===
+# ══════════════════════════════════════════════
+#  OS FILES
+# ══════════════════════════════════════════════
 .DS_Store
 ._*
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# === Logs y Temporales ===
+# ══════════════════════════════════════════════
+#  LOGS & TEMP
+# ══════════════════════════════════════════════
 *.log
 /tmp/
 *.tmp
+*.bak
+*.orig
 
-# === Node (por si acaso) ===
+# ══════════════════════════════════════════════
+#  DEPENDENCIES
+# ══════════════════════════════════════════════
 node_modules/
-
-# === Dependencias descargadas ===
 Pods/
 Carthage/
 
-# === Scripts de generación (no exponer synth interno) ===
-scripts/
+# ══════════════════════════════════════════════
+#  RELEASE ARTIFACTS (stored in GitHub Releases)
+# ══════════════════════════════════════════════
+releases/

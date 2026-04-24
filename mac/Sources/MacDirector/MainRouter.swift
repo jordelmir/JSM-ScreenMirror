@@ -40,6 +40,7 @@ enum VideoQuality: String, CaseIterable, Identifiable {
 /// Orquestador Supremo de la App Mac.
 /// Levanta e inyecta las tuberías aisladas: 
 /// ScreenCapture -> Compositor -> AssetWriter
+/// Bonjour -> Signaling -> WebRTC (ICE + SDP) -> Metal PIP
 @MainActor
 class RuntimeOrchestrator: ObservableObject {
     @Published var isRecording = false
@@ -49,6 +50,12 @@ class RuntimeOrchestrator: ObservableObject {
     @Published var fps: Int = 0
     @Published var showPermissionAlert = false
     @Published var recordingError: String? = nil
+    
+    // ─── Estado de conexión Android ───
+    @Published var androidConnectionState: String = "IDLE"
+    @Published var androidPosture: String = "—"
+    @Published var androidOrientation: String = "—"
+    @Published var androidDimensions: String = "—"
     
     private var recordingTimer: Timer?
     private var telemetryTimer: Timer?
@@ -61,12 +68,15 @@ class RuntimeOrchestrator: ObservableObject {
     let bonjourBrowser = BonjourBrowser()
     let signalingClient = SignalingClient()
     let sensory = SensoryFeedbackManager.shared
+    let layoutEngine = LayoutMorphEngine()
+    let hotKeyObserver = HotKeyObserver()
     
     public var metalCompositor: MetalCompositor?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
         setupPipeline()
+        setupHotKeys()
     }
 
     private func setupPipeline() {
@@ -81,6 +91,13 @@ class RuntimeOrchestrator: ObservableObject {
         // ScreenCapture envía el frame crudo + el PTS nativo (evita desincronización de audio/video)
         screenCapture.directPixelBufferHandler = { [weak self] pixelBuffer, pts in
             guard let self = self else { return }
+            
+            // Inyectar posición PIP dinámica desde el LayoutMorphEngine (thread-safe via os_unfair_lock)
+            self.metalCompositor?.pipLayoutRect = self.layoutEngine.currentLayout
+            
+            // Inyectar anotaciones pre-cacheadas (snapshot síncrono, sin async Task)
+            self.metalCompositor?.activeAnnotations = EphemeralEngine.cachedCompositorStrokes
+            
             self.metalCompositor?.updateMacScreen(pixelBuffer: pixelBuffer, pts: pts)
         }
         
@@ -98,6 +115,98 @@ class RuntimeOrchestrator: ObservableObject {
         rtcController.videoSink.onFrameReceived = { [weak self] pixelBuffer in
             self?.metalCompositor?.updateAndroidStream(pixelBuffer: pixelBuffer)
         }
+        
+        // 4. ── ICE candidates: RTC ↔ Signaling bridge ──
+        rtcController.onLocalIceCandidate = { [weak self] candidate in
+            self?.signalingClient.sendIceCandidate(
+                candidate: candidate.sdp,
+                sdpMid: candidate.sdpMid,
+                sdpMLineIndex: candidate.sdpMLineIndex
+            )
+        }
+        
+        signalingClient.onRemoteIceCandidateReceived = { [weak self] candidate, sdpMid, sdpMLineIndex in
+            self?.rtcController.addRemoteIceCandidate(
+                candidate: candidate,
+                sdpMid: sdpMid,
+                sdpMLineIndex: sdpMLineIndex
+            )
+        }
+        
+        // 5. ── DataChannel: metadatos del Android (fold, orientación) ──
+        rtcController.onDataChannelMessage = { [weak self] message in
+            self?.handleAndroidDataChannelMessage(message)
+        }
+        
+        // 6. ── Observar estado de conexión P2P ──
+        rtcController.$isP2PConnected.sink { [weak self] connected in
+            Task { @MainActor in
+                self?.androidConnectionState = connected ? "CONNECTED" : "WAITING"
+                if connected {
+                    self?.sensory.triggerHapticAlignment()
+                }
+            }
+        }.store(in: &cancellables)
+    }
+    
+    /// Procesa mensajes del DataChannel del Android
+    private func handleAndroidDataChannelMessage(_ message: String) {
+        let parts = message.components(separatedBy: ":")
+        guard let command = parts.first else { return }
+        
+        switch command {
+        case "POSTURE":
+            if parts.count >= 2 {
+                let posture = parts[1]
+                androidPosture = posture
+                
+                switch posture {
+                case "FOLDED":
+                    layoutEngine.transition(to: .foldedPortrait)
+                    sensory.triggerHapticLevelChange()
+                case "UNFOLDED":
+                    layoutEngine.transition(to: .unfoldedTablet)
+                    sensory.triggerHapticLevelChange()
+                case "HALF_OPENED":
+                    layoutEngine.transition(to: .unfoldedTablet)
+                    sensory.triggerHapticLevelChange()
+                default:
+                    break
+                }
+            }
+            
+        case "ORIENTATION":
+            if parts.count >= 4 {
+                androidOrientation = parts[1] // PORTRAIT or LANDSCAPE
+                androidDimensions = "\(parts[2])×\(parts[3])"
+                
+                if parts[1] == "LANDSCAPE" {
+                    layoutEngine.transition(to: .landscapeGaming)
+                }
+            }
+            
+        default:
+            print("DataChannel: Comando no reconocido: \(command)")
+        }
+    }
+    
+    /// Conecta el HotKeyObserver al LayoutMorphEngine y MetalCompositor
+    private func setupHotKeys() {
+        hotKeyObserver.$currentLayout.sink { [weak self] layout in
+            Task { @MainActor in
+                guard let self = self else { return }
+                switch layout {
+                case .hidden:
+                    self.metalCompositor?.isAndroidOverlayEnabled = false
+                case .cornerPIP:
+                    self.metalCompositor?.isAndroidOverlayEnabled = true
+                    self.layoutEngine.transition(to: .foldedPortrait)
+                case .splitScreen:
+                    self.metalCompositor?.isAndroidOverlayEnabled = true
+                    self.layoutEngine.transition(to: .unfoldedTablet)
+                }
+            }
+        }.store(in: &cancellables)
     }
     
     func bootEngine() {
@@ -111,6 +220,7 @@ class RuntimeOrchestrator: ObservableObject {
             do {
                 try await screenCapture.startCapture(quality: selectedQuality.size)
                 bonjourBrowser.startDiscovery()
+                androidConnectionState = "SCANNING"
                 
                 // Telemetría de FPS Master (basada en frames REALES de SCKit)
                 telemetryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -130,14 +240,18 @@ class RuntimeOrchestrator: ObservableObject {
                 // Inicializamos WebRTC antes del Handshake
                 self.rtcController.createPeerConnection()
                 
-                // [Handshake Automático]...
+                // [Handshake Automático]: Bonjour descubre Android → conecta signaling
                 bonjourBrowser.$discoveredHost.sink { [weak self] host in
                     guard let self = self, let host = host, let port = self.bonjourBrowser.discoveredPort else { return }
+                    self.androidConnectionState = "DISCOVERED"
                     self.signalingClient.connect(to: host, port: port)
                 }.store(in: &cancellables)
                 
-                // [SDP Swap]...
+                // [SDP Swap]: Android envía Offer → Mac responde con Answer
                 signalingClient.onSDPOfferReceived = { [weak self] offerSdp in
+                    Task { @MainActor in
+                        self?.androidConnectionState = "NEGOTIATING"
+                    }
                     self?.rtcController.handleRemoteOffer(sdp: offerSdp) { answerSdp in
                         self?.signalingClient.sendAnswer(sdp: answerSdp)
                     }
@@ -230,6 +344,29 @@ class RuntimeOrchestrator: ObservableObject {
         } else {
             NSWorkspace.shared.open(downloadsURL)
         }
+    }
+    
+    /// Apagado completo de todos los subsistemas.
+    /// Llamado al cerrar la app o resetear el motor.
+    func shutdownEngine() {
+        if isRecording { stopRecording() }
+        
+        telemetryTimer?.invalidate()
+        telemetryTimer = nil
+        
+        // P2P teardown (orden: RTC → Signaling → Discovery)
+        rtcController.dispose()
+        signalingClient.disconnect()
+        bonjourBrowser.stopDiscovery()
+        
+        // Capture teardown
+        Task { try? await screenCapture.stopCapture() }
+        
+        cancellables.removeAll()
+        
+        isBooted = false
+        androidConnectionState = "IDLE"
+        print("Engine shutdown completo.")
     }
 }
 

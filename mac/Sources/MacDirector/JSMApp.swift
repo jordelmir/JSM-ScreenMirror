@@ -20,6 +20,9 @@ struct MacDirectorApp: App {
                     }
                 }
             }
+            .onDisappear {
+                engine.shutdownEngine()
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

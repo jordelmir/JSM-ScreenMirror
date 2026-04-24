@@ -1,26 +1,42 @@
 package com.jsm.core
 
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import android.content.Intent
 import android.content.Context
 import android.media.projection.MediaProjectionManager
+import android.util.Log
+import com.jsm.core.foldable.FoldStateListener
 import com.jsm.core.sensory.SensoryFeedbackManager
 import com.jsm.core.signaling.NsdBroadcaster
 import com.jsm.core.signaling.SignalingServer
 import com.jsm.core.webrtc.CaptureForegroundService
 import com.jsm.core.webrtc.RTCClient
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import org.webrtc.IceCandidate
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
@@ -32,45 +48,59 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var nsdBroadcaster: NsdBroadcaster
     private lateinit var sensoryFeedback: SensoryFeedbackManager
+    private lateinit var foldStateListener: FoldStateListener
     private var rtcClient: RTCClient? = null
     private var signalingServer: SignalingServer? = null
-    
+    private var foldMonitorJob: Job? = null
+
     private val RECORD_REQUEST_CODE = 999
+
+    // ─── Observable State ───
     private var isBroadcastingState = mutableStateOf(false)
+    private var connectionState = mutableStateOf("IDLE")
+    private var peerState = mutableStateOf("—")
+    private var lastFoldPosture = mutableStateOf("UNKNOWN")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         nsdBroadcaster = NsdBroadcaster(this)
         sensoryFeedback = SensoryFeedbackManager(this)
+        foldStateListener = FoldStateListener(this)
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(background = Color(0xFF0F0F13))) {
+            MaterialTheme(colorScheme = darkColorScheme(background = Color(0xFF080810))) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    CyberPunkControlPanel()
+                    ElysiumControlPanel()
                 }
             }
         }
     }
 
     private fun startMediaProjectionRequest() {
-        val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val mediaProjectionManager =
+            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        @Suppress("DEPRECATION")
         startActivityForResult(mediaProjectionManager.createScreenCaptureIntent(), RECORD_REQUEST_CODE)
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == RECORD_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
-            bootWebRTC(data)
+            bootFullPipeline(data)
         } else {
             isBroadcastingState.value = false
+            connectionState.value = "PERMISSION_DENIED"
         }
     }
 
-    private fun bootWebRTC(projectionData: Intent) {
+    private fun bootFullPipeline(projectionData: Intent) {
+        connectionState.value = "INITIALIZING"
+
         val pcObserver = object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {}
             override fun onAddStream(stream: MediaStream) {}
@@ -86,79 +116,557 @@ class MainActivity : ComponentActivity() {
         }
 
         rtcClient = RTCClient(this, pcObserver)
-        rtcClient?.startStreaming(projectionData)
 
+        // ICE → Signaling bridge
+        rtcClient?.onLocalIceCandidate = { candidate ->
+            signalingServer?.sendIceCandidate(
+                candidate.sdp,
+                candidate.sdpMid,
+                candidate.sdpMLineIndex
+            )
+        }
+
+        // Connection state tracking
+        rtcClient?.onConnectionStateChanged = { state ->
+            runOnUiThread {
+                peerState.value = state.name
+                when (state) {
+                    PeerConnection.IceConnectionState.CONNECTED,
+                    PeerConnection.IceConnectionState.COMPLETED -> {
+                        connectionState.value = "STREAMING"
+                        sensoryFeedback.triggerPairingSuccess()
+                        startFoldStateMonitoring()
+                    }
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        connectionState.value = "DISCONNECTED"
+                    }
+                    PeerConnection.IceConnectionState.FAILED -> {
+                        connectionState.value = "FAILED"
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        rtcClient?.startStreaming(projectionData)
+        connectionState.value = "WAITING_FOR_MAC"
+
+        // Signaling server con ICE completo + reconnection
         signalingServer = SignalingServer(
             port = 9999,
             onOfferRequested = { sendOffer ->
+                connectionState.value = "NEGOTIATING"
                 rtcClient?.createOffer { sdp ->
                     sendOffer(sdp.description)
                 }
             },
             onAnswerReceived = { sdpAnswer ->
-                rtcClient?.setRemoteDescription(SessionDescription(SessionDescription.Type.ANSWER, sdpAnswer))
-                sensoryFeedback.triggerPairingSuccess()
+                rtcClient?.setRemoteDescription(
+                    SessionDescription(SessionDescription.Type.ANSWER, sdpAnswer)
+                )
+            },
+            onRemoteIceCandidate = { candidate, sdpMid, sdpMLineIndex ->
+                rtcClient?.addRemoteIceCandidate(candidate, sdpMid, sdpMLineIndex)
+            },
+            onMacDisconnected = {
+                runOnUiThread {
+                    connectionState.value = "MAC_DISCONNECTED"
+                }
             }
         )
         signalingServer?.start()
     }
 
-    @Composable
-    fun CyberPunkControlPanel() {
-        var isBroadcasting by isBroadcastingState
+    /**
+     * Inicia el monitoreo de fold state y lo envía por DataChannel al Mac.
+     */
+    private fun startFoldStateMonitoring() {
+        // lifecycleScope se cancela automáticamente en onDestroy
+        foldMonitorJob = lifecycleScope.launch {
+            foldStateListener.monitorDevicePosture().collect { posture ->
+                val postureStr = posture.name
+                lastFoldPosture.value = postureStr
+                rtcClient?.sendDataChannelMessage("POSTURE:$postureStr")
+                sensoryFeedback.triggerDataChannelReceived()
+            }
+        }
 
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Elysium Vanguard Link",
-                color = Color(0xFF00E5FF),
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold)
-            )
-            
-            Spacer(modifier = Modifier.height(60.dp))
-            
-            Button(
-                onClick = {
-                    isBroadcasting = !isBroadcasting
-                    if (isBroadcasting) {
-                        nsdBroadcaster.startBroadcasting(9999)
-                        
-                        // Encender Inmunidad de Sistema Android 14+
-                        val serviceIntent = Intent(this@MainActivity, CaptureForegroundService::class.java)
-                        startForegroundService(serviceIntent)
-                        
-                        // Solicitar captura de pantalla
-                        startMediaProjectionRequest()
-                    } else {
-                        nsdBroadcaster.stopBroadcasting()
-                        signalingServer?.stop()
-                        stopService(Intent(this@MainActivity, CaptureForegroundService::class.java))
-                    }
-                },
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isBroadcasting) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color.DarkGray
-                ),
-                elevation = ButtonDefaults.buttonElevation(
-                    defaultElevation = if (isBroadcasting) 20.dp else 0.dp
-                ),
+        // Enviar orientación/dimensiones actuales
+        sendCurrentOrientation()
+    }
+
+    private fun sendCurrentOrientation() {
+        val config = resources.configuration
+        val isLandscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val dm = resources.displayMetrics
+        val msg = "ORIENTATION:${if (isLandscape) "LANDSCAPE" else "PORTRAIT"}:${dm.widthPixels}:${dm.heightPixels}"
+        rtcClient?.sendDataChannelMessage(msg)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        sendCurrentOrientation()
+    }
+
+    private fun stopPipeline() {
+        foldMonitorJob?.cancel()
+        foldMonitorJob = null
+        nsdBroadcaster.stopBroadcasting()
+        signalingServer?.stop()
+        signalingServer = null
+        rtcClient?.dispose()
+        rtcClient = null
+        stopService(Intent(this, CaptureForegroundService::class.java))
+        connectionState.value = "IDLE"
+        peerState.value = "—"
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  COMPOSE UI — Cyberpunk Premium Control Panel
+    // ══════════════════════════════════════════════════════════════
+
+    @Composable
+    fun ElysiumControlPanel() {
+        var isBroadcasting by isBroadcastingState
+        val connState by connectionState
+        val peer by peerState
+        val foldPosture by lastFoldPosture
+
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val pulseAlpha by infiniteTransition.animateFloat(
+            initialValue = 0.3f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ), label = "pulseAlpha"
+        )
+        val radarScale by infiniteTransition.animateFloat(
+            initialValue = 0.6f, targetValue = 1.4f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2500, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ), label = "radarScale"
+        )
+        val glowRotation by infiniteTransition.animateFloat(
+            initialValue = 0f, targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(8000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ), label = "glowRotation"
+        )
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            // ─── Fondo Deep Space ───
+            Box(
                 modifier = Modifier
-                    .width(200.dp)
-                    .height(60.dp)
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF060610),
+                                Color(0xFF0A0B1A),
+                                Color(0xFF080814),
+                                Color(0xFF060610)
+                            )
+                        )
+                    )
+            )
+
+            // ─── Grid Industrial de Fondo ───
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier.fillMaxSize()
             ) {
+                val gridSpacing = 36.dp.toPx()
+                val gridColor = Color.White.copy(alpha = 0.025f)
+                for (x in 0..((size.width / gridSpacing).toInt())) {
+                    drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(x * gridSpacing, 0f),
+                        end = androidx.compose.ui.geometry.Offset(x * gridSpacing, size.height), strokeWidth = 0.5f)
+                }
+                for (y in 0..((size.height / gridSpacing).toInt())) {
+                    drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(0f, y * gridSpacing),
+                        end = androidx.compose.ui.geometry.Offset(size.width, y * gridSpacing), strokeWidth = 0.5f)
+                }
+            }
+
+            // ─── Glow ambiental superior (Cyan) ───
+            Box(
+                modifier = Modifier
+                    .size(320.dp)
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-100).dp)
+                    .blur(70.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF00E5FF).copy(alpha = 0.10f),
+                                Color.Transparent
+                            )
+                        ),
+                        shape = CircleShape
+                    )
+            )
+
+            // ─── Glow ambiental inferior (Purple) ───
+            Box(
+                modifier = Modifier
+                    .size(250.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 60.dp, y = 80.dp)
+                    .blur(60.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFFE040FB).copy(alpha = 0.06f),
+                                Color.Transparent
+                            )
+                        ),
+                        shape = CircleShape
+                    )
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 28.dp)
+                    .systemBarsPadding(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // ─── Header ───
                 Text(
-                    text = if (isBroadcasting) "Sincronizando..." else "Iniciar Enlace WebRTC",
-                    color = if (isBroadcasting) Color(0xFF00E5FF) else Color.White
+                    text = "ELYSIUM",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF00E5FF),
+                    letterSpacing = 10.sp
                 )
+                Text(
+                    text = "VANGUARD LINK",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White.copy(alpha = 0.25f),
+                    letterSpacing = 8.sp
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // ─── Status Chips ───
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StatusChip("NSD", if (isBroadcasting) "LIVE" else "OFF",
+                        if (isBroadcasting) Color(0xFF00E5FF) else Color(0xFF555566),
+                        isBroadcasting,
+                        Modifier.weight(1f))
+                    StatusChip("P2P", when {
+                        peer.contains("CONNECTED") || peer.contains("COMPLETED") -> "OK"
+                        peer.contains("CHECKING") -> "..."
+                        peer.contains("FAILED") -> "ERR"
+                        else -> "—"
+                    },
+                        when {
+                            peer.contains("CONNECTED") || peer.contains("COMPLETED") -> Color(0xFF00E676)
+                            peer.contains("CHECKING") -> Color(0xFFFFAB00)
+                            peer.contains("FAILED") -> Color(0xFFFF1744)
+                            else -> Color(0xFF555566)
+                        },
+                        peer.contains("CONNECTED") || peer.contains("COMPLETED"),
+                        Modifier.weight(1f))
+                    StatusChip("FOLD", when(foldPosture) {
+                        "FOLDED" -> "FOLD"
+                        "HALF_OPENED" -> "HALF"
+                        "UNFOLDED" -> "OPEN"
+                        else -> "—"
+                    },
+                        Color(0xFFE040FB),
+                        foldPosture != "UNKNOWN",
+                        Modifier.weight(1f))
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // ─── Connection State Banner ───
+                AnimatedVisibility(visible = connState != "IDLE") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(connectionColor(connState).copy(alpha = 0.06f))
+                            .border(1.dp, connectionColor(connState).copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Indicador pulsante
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(
+                                        connectionColor(connState).copy(alpha = pulseAlpha),
+                                        CircleShape
+                                    )
+                            )
+                            Column {
+                                Text(
+                                    text = connState.replace("_", " "),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = connectionColor(connState)
+                                )
+                                Text(
+                                    text = when(connState) {
+                                        "STREAMING" -> "1080p @ 60fps • WebRTC P2P • LAN"
+                                        "WAITING_FOR_MAC" -> "Servidor TCP activo en puerto 9999"
+                                        "NEGOTIATING" -> "Intercambiando SDP + ICE candidates..."
+                                        "MAC_DISCONNECTED" -> "Esperando reconexión automática..."
+                                        else -> "Inicializando subsistemas..."
+                                    },
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.White.copy(alpha = 0.35f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ─── Telemetry Panel (visible when P2P connected) ───
+                AnimatedVisibility(visible = peer.contains("CONNECTED") || peer.contains("COMPLETED")) {
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFFE040FB).copy(alpha = 0.04f))
+                                .border(0.5.dp, Color(0xFFE040FB).copy(alpha = 0.15f), RoundedCornerShape(14.dp))
+                                .padding(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                TelemetryItem("POSTURE", when(foldPosture) {
+                                    "FOLDED" -> "📱 FOLD"
+                                    "HALF_OPENED" -> "📐 HALF"
+                                    "UNFOLDED" -> "📺 OPEN"
+                                    else -> "❓"
+                                }, Color(0xFFE040FB))
+                                TelemetryItem("STREAM", "1080p", Color(0xFF00E5FF))
+                                TelemetryItem("CODEC", "VP8/HW", Color(0xFF00E676))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // ─── Main Action Button ───
+                Box(contentAlignment = Alignment.Center) {
+                    // Radar rings (cuando espera Mac)
+                    if (isBroadcasting && connState != "STREAMING") {
+                        Box(
+                            modifier = Modifier
+                                .size((130 * radarScale).dp)
+                                .border(
+                                    1.dp,
+                                    Color(0xFF00E5FF).copy(alpha = (1f - (radarScale - 0.6f) / 0.8f).coerceIn(0f, 1f)),
+                                    CircleShape
+                                )
+                        )
+                        // Segunda onda offset
+                        Box(
+                            modifier = Modifier
+                                .size((130 * ((radarScale + 0.3f) % 1.4f + 0.6f)).dp)
+                                .border(
+                                    0.5.dp,
+                                    Color(0xFF00E5FF).copy(alpha = 0.15f),
+                                    CircleShape
+                                )
+                        )
+                    }
+
+                    // Glow ring detrás del botón
+                    if (isBroadcasting) {
+                        Box(
+                            modifier = Modifier
+                                .size(116.dp)
+                                .blur(12.dp)
+                                .background(
+                                    Color(0xFF00E5FF).copy(alpha = 0.15f * pulseAlpha),
+                                    CircleShape
+                                )
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            if (isBroadcasting) {
+                                isBroadcasting = false
+                                stopPipeline()
+                            } else {
+                                isBroadcasting = true
+                                nsdBroadcaster.startBroadcasting(9999)
+                                val serviceIntent = Intent(this@MainActivity, CaptureForegroundService::class.java)
+                                startForegroundService(serviceIntent)
+                                startMediaProjectionRequest()
+                            }
+                        },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isBroadcasting)
+                                Color(0xFF00E5FF).copy(alpha = 0.12f)
+                            else
+                                Color.White.copy(alpha = 0.05f)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.5.dp,
+                            if (isBroadcasting)
+                                Brush.sweepGradient(
+                                    colors = listOf(
+                                        Color(0xFF00E5FF),
+                                        Color(0xFFE040FB),
+                                        Color(0xFF00E5FF)
+                                    )
+                                )
+                            else
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.12f),
+                                        Color.White.copy(alpha = 0.06f)
+                                    )
+                                )
+                        ),
+                        modifier = Modifier.size(104.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = if (isBroadcasting) "■" else "▶",
+                                fontSize = if (isBroadcasting) 22.sp else 26.sp,
+                                color = if (isBroadcasting) Color(0xFF00E5FF) else Color.White
+                            )
+                            Text(
+                                text = if (isBroadcasting) "STOP" else "LINK",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (isBroadcasting) Color(0xFF00E5FF).copy(alpha = 0.8f) else Color.White.copy(alpha = 0.5f),
+                                letterSpacing = 3.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // ─── Footer ───
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Divider(
+                        modifier = Modifier
+                            .width(60.dp)
+                            .padding(bottom = 12.dp),
+                        color = Color.White.copy(alpha = 0.06f),
+                        thickness = 0.5.dp
+                    )
+                    Text(
+                        text = "ELYSIUM VANGUARD v1.0",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White.copy(alpha = 0.12f),
+                        textAlign = TextAlign.Center,
+                        letterSpacing = 2.sp
+                    )
+                    Text(
+                        text = "P2P SCREEN MIRROR STUDIO",
+                        fontSize = 7.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White.copy(alpha = 0.06f),
+                        textAlign = TextAlign.Center,
+                        letterSpacing = 3.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }
 
+    @Composable
+    private fun StatusChip(label: String, value: String, color: Color, isActive: Boolean, modifier: Modifier = Modifier) {
+        Column(
+            modifier = modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    if (isActive) color.copy(alpha = 0.06f) else Color.White.copy(alpha = 0.025f)
+                )
+                .border(
+                    0.5.dp,
+                    if (isActive) color.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.05f),
+                    RoundedCornerShape(12.dp)
+                )
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = label,
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = color.copy(alpha = 0.45f),
+                letterSpacing = 2.sp
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = value,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                color = color
+            )
+        }
+    }
+
+    @Composable
+    private fun TelemetryItem(label: String, value: String, color: Color) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = label,
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                color = color.copy(alpha = 0.4f),
+                letterSpacing = 1.sp
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                color = color
+            )
+        }
+    }
+
+    private fun connectionColor(state: String): Color = when (state) {
+        "STREAMING" -> Color(0xFF00E676)
+        "NEGOTIATING", "WAITING_FOR_MAC" -> Color(0xFF00E5FF)
+        "INITIALIZING" -> Color(0xFFFFAB00)
+        "FAILED", "PERMISSION_DENIED" -> Color(0xFFFF1744)
+        "MAC_DISCONNECTED" -> Color(0xFFFF6D00)
+        "DISCONNECTED" -> Color(0xFFFF6D00)
+        else -> Color.Gray
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        nsdBroadcaster.stopBroadcasting()
+        stopPipeline()
     }
 }
+

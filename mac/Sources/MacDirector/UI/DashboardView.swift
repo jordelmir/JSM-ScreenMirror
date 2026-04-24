@@ -63,7 +63,11 @@ struct DashboardView: View {
                     HStack(spacing: 8) {
                         StatusPill(label: "TCC", value: engine.screenCapture.isAuthorized ? "OK" : "⚠", color: engine.screenCapture.isAuthorized ? .green : .red)
                         StatusPill(label: "MOTOR", value: engine.isBooted ? "ON" : "OFF", color: engine.isBooted ? .green : .gray)
-                        StatusPill(label: "P2P", value: engine.bonjourBrowser.isSearching ? "SCAN" : "IDLE", color: engine.bonjourBrowser.isSearching ? .cyan : .gray)
+                        StatusPill(
+                            label: "P2P",
+                            value: engine.rtcController.isP2PConnected ? "LIVE" : (engine.bonjourBrowser.isSearching ? "SCAN" : "IDLE"),
+                            color: engine.rtcController.isP2PConnected ? .green : (engine.bonjourBrowser.isSearching ? .cyan : .gray)
+                        )
                         
                         Spacer()
                         
@@ -186,6 +190,62 @@ struct DashboardView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.06), lineWidth: 1))
                     )
                     .padding(.horizontal, 20)
+                    
+                    // ─── Android Link Status ───
+                    if engine.rtcController.isP2PConnected || engine.androidConnectionState != "IDLE" {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(engine.rtcController.isP2PConnected ? Color.green : Color.cyan.opacity(0.5))
+                                    .frame(width: 6, height: 6)
+                                Text("ANDROID LINK")
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.cyan.opacity(0.5))
+                                Spacer()
+                                Text(engine.androidConnectionState)
+                                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                                    .foregroundColor(engine.rtcController.isP2PConnected ? .green : .cyan.opacity(0.6))
+                            }
+                            
+                            if engine.rtcController.isP2PConnected {
+                                HStack(spacing: 16) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("POSTURE")
+                                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.purple.opacity(0.5))
+                                        Text(engine.androidPosture)
+                                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                                            .foregroundColor(.purple)
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("ORIENT")
+                                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.orange.opacity(0.5))
+                                        Text(engine.androidOrientation)
+                                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                                            .foregroundColor(.orange)
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("SIZE")
+                                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.3))
+                                        Text(engine.androidDimensions)
+                                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                                            .foregroundColor(.white.opacity(0.6))
+                                    }
+                                    Spacer()
+                                }
+                            }
+                        }
+                        .padding(14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color.cyan.opacity(0.03))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.cyan.opacity(0.1), lineWidth: 1))
+                        )
+                        .padding(.horizontal, 20)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                     
                     // ─── Acciones Principales ───
                     VStack(spacing: 12) {

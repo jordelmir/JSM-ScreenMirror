@@ -1,32 +1,28 @@
 import SwiftUI
 
 /// Panel UI flotante para la Mac que rige el Drag Handle y el Glassmorphism oscuro.
+/// Conectado directamente a EphemeralEngine.shared para que los botones de herramientas
+/// activen/desactiven el modo de dibujo y spotlight en tiempo real.
 struct HUDOverlayView: View {
     @EnvironmentObject var engine: RuntimeOrchestrator
+    @ObservedObject private var annotationEngine = EphemeralEngine.shared
     @State private var dragOffset = CGSize.zero
-    @State private var isLaserActive = false
-    @State private var isSpotlightActive = false
     
     var body: some View {
         HStack(spacing: 12) {
             
-            // Requisito V1: Drag Handle industrial (3 Barras), sin menús de hamburguesa
+            // Drag Handle industrial (3 Barras)
             VStack(spacing: 3) {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.gray.opacity(0.7))
-                    .frame(width: 4, height: 18)
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.gray.opacity(0.7))
-                    .frame(width: 4, height: 18)
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.gray.opacity(0.7))
-                    .frame(width: 4, height: 18)
+                ForEach(0..<3, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.gray.opacity(0.7))
+                        .frame(width: 4, height: 18)
+                }
             }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture()
                     .onChanged { value in
-                        // Lógica para interceptar NSWindow drag en AppKit irá aquí
                         self.dragOffset = value.translation
                     }
                     .onEnded { _ in self.dragOffset = .zero }
@@ -52,25 +48,55 @@ struct HUDOverlayView: View {
                     engine.toggleRecording()
                 }
                 
-                ToolButton(icon: "pencil.and.outline", color: isLaserActive ? .cyan : .gray) {
-                    isLaserActive.toggle()
-                    if isLaserActive { isSpotlightActive = false }
+                // Lápiz Neón — activa modo dibujo en EphemeralEngine
+                ToolButton(
+                    icon: "pencil.and.outline",
+                    color: !annotationEngine.isSpotlightActive ? .cyan : .gray,
+                    isActive: !annotationEngine.isSpotlightActive
+                ) {
+                    if annotationEngine.isSpotlightActive {
+                        annotationEngine.isSpotlightActive = false
+                    }
                     SensoryFeedbackManager.shared.triggerHapticGeneric()
-                    print("Lápiz Neón Toggled: \(isLaserActive)")
                 }
                 
-                ToolButton(icon: "dot.radiowaves.up.forward", color: isSpotlightActive ? .green : .gray) {
-                    isSpotlightActive.toggle()
-                    if isSpotlightActive { isLaserActive = false }
+                // Spotlight Radar — activa modo spotlight en EphemeralEngine
+                ToolButton(
+                    icon: "dot.radiowaves.up.forward",
+                    color: annotationEngine.isSpotlightActive ? .green : .gray,
+                    isActive: annotationEngine.isSpotlightActive
+                ) {
+                    annotationEngine.isSpotlightActive.toggle()
                     SensoryFeedbackManager.shared.triggerHapticGeneric()
-                    print("Spotlight Radar Toggled: \(isSpotlightActive)")
+                }
+
+                Divider()
+                    .background(Color.white.opacity(0.1))
+                    .frame(height: 18)
+                
+                // Color picker para el trazo neón
+                HStack(spacing: 6) {
+                    ForEach([Color.cyan, Color.red, Color.green, Color.yellow, Color.purple], id: \.self) { color in
+                        Circle()
+                            .fill(color)
+                            .frame(width: annotationEngine.strokeColor == color ? 14 : 10, height: annotationEngine.strokeColor == color ? 14 : 10)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(annotationEngine.strokeColor == color ? 0.8 : 0), lineWidth: 1.5)
+                            )
+                            .onTapGesture {
+                                annotationEngine.strokeColor = color
+                                SensoryFeedbackManager.shared.triggerHapticGeneric()
+                            }
+                            .animation(.spring(response: 0.2), value: annotationEngine.strokeColor == color)
+                    }
                 }
 
                 Divider()
                     .background(Color.white.opacity(0.1))
                     .frame(height: 18)
 
-                // El Switch de "Capacidad": Solo Mac vs Mac + Android
+                // Switch Mac-only vs Mac+Android
                 ToolButton(
                     icon: (engine.metalCompositor?.isAndroidOverlayEnabled ?? true) ? "iphone.badge.plus" : "desktopcomputer", 
                     color: (engine.metalCompositor?.isAndroidOverlayEnabled ?? true) ? .cyan : .gray
@@ -78,7 +104,6 @@ struct HUDOverlayView: View {
                     let currentState = engine.metalCompositor?.isAndroidOverlayEnabled ?? true
                     engine.metalCompositor?.isAndroidOverlayEnabled = !currentState
                     SensoryFeedbackManager.shared.playMechanicalClick()
-                    print("Capacidad Cambiada: Is Android PIP Enabled = \(!currentState)")
                 }
             }
             .padding(.horizontal, 8)
@@ -101,7 +126,6 @@ struct HUDOverlayView: View {
                     lineWidth: 1.5
                 )
         )
-        // Shadow envolvente estilo resplandor neón constante
         .shadow(color: .cyan.opacity(0.2), radius: 10)
     }
 }
@@ -109,18 +133,26 @@ struct HUDOverlayView: View {
 struct ToolButton: View {
     let icon: String
     let color: Color
+    var isActive: Bool = false
     let action: () -> Void
+    @State private var isHovered = false
     
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(color)
+                .scaleEffect(isHovered ? 1.15 : 1.0)
+                .animation(.spring(response: 0.2), value: isHovered)
         }
         .buttonStyle(.plain)
-        .onHover { isHovered in
-            // Micro-animaciones tácticas al pasar el cursor
-            NSCursor.pointingHand.set()
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
         }
     }
 }

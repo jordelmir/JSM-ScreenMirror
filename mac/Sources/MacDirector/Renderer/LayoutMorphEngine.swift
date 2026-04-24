@@ -1,9 +1,14 @@
 import Foundation
 import CoreGraphics
 import CoreVideo
+import os
 
 /// Orquestador matemático que interviene las matrices del MetalCompositor 
 /// cuando el DataChannel notifica que el usuario abrió su Honor Magic V2.
+///
+/// `currentLayout` es un CGRect normalizado (0.0-1.0) que define la posición
+/// y tamaño del PIP Android dentro de la escena de composición.
+/// El MetalCompositor lo lee en cada frame para transformar el overlay.
 class LayoutMorphEngine {
     
     enum DeviceState {
@@ -12,7 +17,21 @@ class LayoutMorphEngine {
         case landscapeGaming
     }
     
-    private var currentLayout: CGRect = .zero
+    /// Lock para acceso thread-safe a currentLayout.
+    /// CVDisplayLink escribe desde su thread C; SCStream capture lee desde otro.
+    private var layoutLock = os_unfair_lock()
+    private var _currentLayout: CGRect
+    
+    /// Rect normalizado actual del PIP Android (0.0–1.0). Thread-safe.
+    /// Leído por MetalCompositor en cada frame desde el capture thread.
+    var currentLayout: CGRect {
+        os_unfair_lock_lock(&layoutLock)
+        let value = _currentLayout
+        os_unfair_lock_unlock(&layoutLock)
+        return value
+    }
+    
+    private var startLayout: CGRect = .zero
     private var targetLayout: CGRect = .zero
     private var isMorphing = false
     
@@ -21,25 +40,36 @@ class LayoutMorphEngine {
     private var morphProgress: CGFloat = 0.0
     
     init() {
-        self.currentLayout = CGRect(x: 0.75, y: 0.1, width: 0.20, height: 0.8)
+        // Default: PIP compacto en esquina inferior-derecha
+        self._currentLayout = CGRect(x: 0.73, y: 0.02, width: 0.25, height: 0.35)
     }
 
     /// Llamado desde el Protobuf/WebRTC Receiver al detectar el `DevicePostureChanged`
     func transition(to newState: DeviceState) {
         switch newState {
         case .foldedPortrait:
-            targetLayout = CGRect(x: 0.75, y: 0.1, width: 0.20, height: 0.8)
+            // PIP compacto vertical, esquina inferior derecha
+            targetLayout = CGRect(x: 0.73, y: 0.02, width: 0.25, height: 0.35)
         case .unfoldedTablet:
-            targetLayout = CGRect(x: 0.60, y: 0.2, width: 0.35, height: 0.6)
+            // PIP grande tipo tablet, centrado-derecha
+            targetLayout = CGRect(x: 0.58, y: 0.10, width: 0.40, height: 0.55)
         case .landscapeGaming:
-            targetLayout = CGRect(x: 0.2, y: 0.7, width: 0.6, height: 0.25)
+            // PIP ancho en la parte inferior, centrado
+            targetLayout = CGRect(x: 0.20, y: 0.02, width: 0.60, height: 0.28)
         }
         
         startMorphingAnimation()
     }
     
     private func startMorphingAnimation() {
-        guard !isMorphing else { return }
+        // Guardar posición de inicio para interpolación correcta
+        startLayout = currentLayout
+        
+        guard !isMorphing else {
+            // Si ya estamos morphing, simplemente actualizamos el target
+            morphProgress = 0.0
+            return
+        }
         isMorphing = true
         morphProgress = 0.0
         
@@ -60,10 +90,13 @@ class LayoutMorphEngine {
     }
     
     private func renderTick() {
-        morphProgress += 0.08
+        morphProgress += 0.06 // ~16 frames para completar (~267ms a 60hz)
         
         if morphProgress >= 1.0 {
-            currentLayout = targetLayout
+            morphProgress = 1.0
+            os_unfair_lock_lock(&layoutLock)
+            _currentLayout = targetLayout
+            os_unfair_lock_unlock(&layoutLock)
             isMorphing = false
             if let link = displayLink {
                 CVDisplayLinkStop(link)
@@ -71,12 +104,15 @@ class LayoutMorphEngine {
             displayLink = nil
         } else {
             let eased = cubicEaseInOut(morphProgress)
-            currentLayout = CGRect(
-                x: lerp(currentLayout.minX, targetLayout.minX, t: eased),
-                y: lerp(currentLayout.minY, targetLayout.minY, t: eased),
-                width: lerp(currentLayout.width, targetLayout.width, t: eased),
-                height: lerp(currentLayout.height, targetLayout.height, t: eased)
+            let newRect = CGRect(
+                x: lerp(startLayout.minX, targetLayout.minX, t: eased),
+                y: lerp(startLayout.minY, targetLayout.minY, t: eased),
+                width: lerp(startLayout.width, targetLayout.width, t: eased),
+                height: lerp(startLayout.height, targetLayout.height, t: eased)
             )
+            os_unfair_lock_lock(&layoutLock)
+            _currentLayout = newRect
+            os_unfair_lock_unlock(&layoutLock)
         }
     }
     
