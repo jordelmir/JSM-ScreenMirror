@@ -11,7 +11,7 @@ struct AndroidPreviewView: NSViewRepresentable {
         let displayLayer = AVSampleBufferDisplayLayer()
         
         init() {
-            displayLayer.videoGravity = .resizeAspectFill
+            displayLayer.videoGravity = .resizeAspect
             displayLayer.backgroundColor = NSColor.black.cgColor
             displayLayer.preventsDisplaySleepDuringVideoPlayback = false
         }
@@ -81,15 +81,19 @@ struct AndroidPreviewView: NSViewRepresentable {
 // MARK: - Premium Phone Frame Constants
 
 /// Aspect ratios for Honor Magic V2 real device dimensions
+/// Aspect = height / width (portrait orientation)
 private enum PhoneDimensions {
-    // Honor Magic V2 folded: 6.43" → 2376x1060 → ~2.24:1
-    static let foldedAspect: CGFloat = 2376.0 / 1060.0  // ≈ 2.24
-    // Honor Magic V2 unfolded: 7.92" → 2156x2344 → ~0.92:1 (almost square)
-    static let unfoldedAspect: CGFloat = 2156.0 / 2344.0  // ≈ 0.92
+    // Honor Magic V2 folded: 6.43" → 1060w x 2376h → ~2.24:1
+    static let foldedAspect: CGFloat = 2376.0 / 1060.0  // ≈ 2.24 (tall phone)
+    // Honor Magic V2 unfolded: 7.92" → 2344w x 2156h → ~0.92:1 (nearly square)
+    static let unfoldedAspect: CGFloat = 2156.0 / 2344.0  // ≈ 0.92 (tablet)
     // Corner radius scaled to match real device (as fraction of width)
     static let cornerRadiusFraction: CGFloat = 0.06
     // Bezel thickness (fraction of width)
     static let bezelFraction: CGFloat = 0.025
+    // Max width constraints per posture (in points)
+    static let maxFoldedWidth: CGFloat = 220
+    static let maxUnfoldedWidth: CGFloat = 380
 }
 
 // MARK: - Device Posture Enum for Preview
@@ -284,8 +288,6 @@ struct AndroidPreviewWindow: View {
     @State private var breathePhase: CGFloat = 0
     
     // Adaptive sizing
-    private let maxPhoneHeight: CGFloat = 680
-    private let maxPhoneWidth: CGFloat = 500
     private let bezelPadding: CGFloat = 8
     
     var body: some View {
@@ -342,10 +344,13 @@ struct AndroidPreviewWindow: View {
             let availH = geo.size.height - 80 // margin + status bar
             let aspect = posture.aspectRatio
             
-            // Calculate phone size to fit within available space
+            // Max width depends on posture: phone = compact, tablet = wider but capped
+            let maxW: CGFloat = posture == .folded ? PhoneDimensions.maxFoldedWidth : PhoneDimensions.maxUnfoldedWidth
+            
+            // Calculate phone size: fit within available space AND max constraints
             let phoneW: CGFloat = {
                 let wFromH = availH / aspect
-                return min(wFromH, availW)
+                return min(min(wFromH, availW), maxW)
             }()
             let phoneH = phoneW * aspect
             let cornerRadius = phoneW * PhoneDimensions.cornerRadiusFraction
