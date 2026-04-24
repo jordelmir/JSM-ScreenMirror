@@ -106,6 +106,19 @@ class RTCClient(
         videoTrack?.let {
             peerConnection?.addTrack(it, listOf("JSM_STREAM"))
             Log.d(TAG, "Video track added to PeerConnection")
+            
+            // ═══ BITRATE BOOST: 8 Mbps para calidad cristalina en LAN ═══
+            peerConnection?.senders?.firstOrNull { sender ->
+                sender.track()?.kind() == "video"
+            }?.let { videoSender ->
+                val params = videoSender.parameters
+                if (params.encodings.isNotEmpty()) {
+                    params.encodings[0].maxBitrateBps = 8_000_000  // 8 Mbps
+                    params.encodings[0].minBitrateBps = 2_000_000  // 2 Mbps min
+                    videoSender.parameters = params
+                    Log.d(TAG, "⚡ Video bitrate set: 2-8 Mbps")
+                }
+            }
         }
     }
 

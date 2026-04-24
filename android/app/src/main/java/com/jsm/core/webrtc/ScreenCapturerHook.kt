@@ -27,8 +27,8 @@ class ScreenCapturerHook(private val context: Context) {
         peerConnectionFactory: PeerConnectionFactory,
         eglBaseContext: EglBase.Context,
         mediaProjectionPermissionResultData: Intent,
-        targetWidth: Int = 1920,
-        targetHeight: Int = 1080,
+        targetWidth: Int = 2560,
+        targetHeight: Int = 1440,
         targetFps: Int = 60
     ): VideoTrack? {
         val callback = object : MediaProjection.Callback() {

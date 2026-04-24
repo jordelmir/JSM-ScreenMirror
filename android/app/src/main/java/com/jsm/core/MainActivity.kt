@@ -216,18 +216,18 @@ class MainActivity : ComponentActivity() {
         sendCurrentOrientation()
         
         // Adaptar la resolución de captura al nuevo layout de pantalla
-        // (El Honor Magic V2 cambia de 1080x2504 a 2160x2504 al desplegar)
+        // Enviar resolución nativa para máxima nitidez en LAN
         val dm = resources.displayMetrics
         val newWidth = dm.widthPixels
         val newHeight = dm.heightPixels
         
         rtcClient?.adaptCaptureResolution(
-            width = minOf(newWidth, 1920),  // Cap a 1920 para no sobrecargar el encoder
-            height = minOf(newHeight, 1080),
+            width = newWidth,
+            height = newHeight,
             fps = 60
         )
         
-        Log.d(TAG, "📐 Capture adaptado: ${minOf(newWidth, 1920)}x${minOf(newHeight, 1080)}")
+        Log.d(TAG, "📐 Capture adaptado: ${newWidth}x${newHeight}")
     }
 
     private fun stopPipeline() {
