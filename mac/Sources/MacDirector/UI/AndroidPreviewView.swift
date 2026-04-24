@@ -85,19 +85,13 @@ struct AndroidPreviewView: NSViewRepresentable {
     }
 }
 
-// MARK: - Premium Phone Frame Constants
+// MARK: - Phone Frame Constants
 
-/// Aspect ratios for Honor Magic V2 real device dimensions
-/// Aspect = height / width (portrait orientation)
 private enum PhoneDimensions {
-    // Honor Magic V2 folded: 6.43" → 1060w x 2376h → ~2.24:1
-    static let foldedAspect: CGFloat = 2376.0 / 1060.0  // ≈ 2.24 (tall phone)
-    // Honor Magic V2 unfolded: 7.92" → 2344w x 2156h → ~0.92:1 (nearly square)
-    static let unfoldedAspect: CGFloat = 2156.0 / 2344.0  // ≈ 0.92 (tablet)
     // Corner radius scaled to match real device (as fraction of width)
-    static let cornerRadiusFraction: CGFloat = 0.06
-    // Bezel thickness (fraction of width)
-    static let bezelFraction: CGFloat = 0.025
+    static let cornerRadiusFraction: CGFloat = 0.045
+    // Default fallback aspect (16:9 portrait) if no stream yet
+    static let defaultAspect: CGFloat = 1920.0 / 1080.0  // 1.78
 }
 
 // MARK: - Device Posture Enum for Preview
@@ -106,13 +100,6 @@ enum PreviewPosture: Equatable {
     case folded
     case unfolded
     case halfOpened
-    
-    var aspectRatio: CGFloat {
-        switch self {
-        case .folded: return PhoneDimensions.foldedAspect
-        case .unfolded, .halfOpened: return PhoneDimensions.unfoldedAspect
-        }
-    }
     
     var label: String {
         switch self {
@@ -288,8 +275,9 @@ struct AndroidPreviewWindow: View {
     @EnvironmentObject var engine: RuntimeOrchestrator
     @State private var currentFrame: CVPixelBuffer?
     @State private var posture: PreviewPosture = .folded
-    @State private var showGlow = false
     @State private var breathePhase: CGFloat = 0
+    /// Aspect ratio derivado de las dimensiones REALES del video stream (height/width)
+    @State private var streamAspect: CGFloat = PhoneDimensions.defaultAspect
     
     // Adaptive sizing
     private let bezelPadding: CGFloat = 6
@@ -322,6 +310,20 @@ struct AndroidPreviewWindow: View {
                minHeight: 500, idealHeight: 720, maxHeight: 880)
         .onReceive(engine.rtcController.$latestPixelBuffer) { pb in
             self.currentFrame = pb
+            // Derivar aspect ratio REAL del stream
+            if let pb = pb {
+                let w = CGFloat(CVPixelBufferGetWidth(pb))
+                let h = CGFloat(CVPixelBufferGetHeight(pb))
+                if w > 0 && h > 0 {
+                    let newAspect = h / w
+                    // Solo actualizar si cambió significativamente (evitar jitter)
+                    if abs(newAspect - streamAspect) > 0.05 {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                            streamAspect = newAspect
+                        }
+                    }
+                }
+            }
         }
         .onReceive(engine.$androidPosture) { postureString in
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
@@ -346,12 +348,14 @@ struct AndroidPreviewWindow: View {
         GeometryReader { geo in
             let availW = geo.size.width - 24  // tight side margins
             let availH = geo.size.height - 60 // top/bottom for HUD
-            let aspect = posture.aspectRatio
             
-            // Phone fills ~92% of available space — it should DOMINATE the window
+            // Usar el aspect ratio REAL del video stream — no specs hardcodeadas
+            let aspect = streamAspect
+            
+            // Phone fills ~95% of available space — DOMINATE the window
             let phoneW: CGFloat = {
                 let wFromH = availH / aspect
-                return min(wFromH, availW) * 0.92
+                return min(wFromH, availW) * 0.95
             }()
             let phoneH = phoneW * aspect
             let cornerRadius = phoneW * PhoneDimensions.cornerRadiusFraction
