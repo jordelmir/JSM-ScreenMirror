@@ -59,6 +59,20 @@ class ScreenCapturerHook(private val context: Context) {
         return peerConnectionFactory.createVideoTrack("JSM_ANDROID_STREAM_TRACK", videoSource)
     }
 
+    /**
+     * Adapta la resolución de captura en tiempo real sin reiniciar el pipeline.
+     * WebRTC's ScreenCapturerAndroid soporta esto nativamente vía changeCaptureFormat().
+     * Esto se activa cuando el Honor Magic V2 cambia entre fold/unfold.
+     */
+    fun changeCaptureFormat(width: Int, height: Int, fps: Int) {
+        try {
+            videoCapturer?.changeCaptureFormat(width, height, fps)
+        } catch (e: Exception) {
+            // Si el capturer no soporta cambio dinámico, ignorar silenciosamente
+            // El stream seguirá con la resolución anterior sin interrupción
+        }
+    }
+
     fun stopCapture() {
         try {
             videoCapturer?.stopCapture()

@@ -163,6 +163,16 @@ class RTCClient(
         }
     }
 
+    /**
+     * Adapta la resolución de captura dinámicamente cuando el dispositivo cambia de estado
+     * (fold/unfold). Esto NO reinicia el PeerConnection ni el MediaProjection.
+     * WebRTC internamente renegocia el codec si es necesario.
+     */
+    fun adaptCaptureResolution(width: Int, height: Int, fps: Int) {
+        screenCapturerHook.changeCaptureFormat(width, height, fps)
+        Log.d(TAG, "📐 Capture resolution adapted: ${width}x${height}@${fps}fps")
+    }
+
     fun dispose() {
         try {
             screenCapturerHook.stopCapture()

@@ -46,6 +46,10 @@ import org.webrtc.RtpReceiver
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        private const val TAG = "ElysiumMainActivity"
+    }
+
     private lateinit var nsdBroadcaster: NsdBroadcaster
     private lateinit var sensoryFeedback: SensoryFeedbackManager
     private lateinit var foldStateListener: FoldStateListener
@@ -205,7 +209,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        Log.d(TAG, "⚡ Config changed: orientation=${newConfig.orientation}, " +
+                "screenW=${newConfig.screenWidthDp}, screenH=${newConfig.screenHeightDp}")
+        
+        // Enviar nuevas dimensiones al Mac inmediatamente
         sendCurrentOrientation()
+        
+        // Adaptar la resolución de captura al nuevo layout de pantalla
+        // (El Honor Magic V2 cambia de 1080x2504 a 2160x2504 al desplegar)
+        val dm = resources.displayMetrics
+        val newWidth = dm.widthPixels
+        val newHeight = dm.heightPixels
+        
+        rtcClient?.adaptCaptureResolution(
+            width = minOf(newWidth, 1920),  // Cap a 1920 para no sobrecargar el encoder
+            height = minOf(newHeight, 1080),
+            fps = 60
+        )
+        
+        Log.d(TAG, "📐 Capture adaptado: ${minOf(newWidth, 1920)}x${minOf(newHeight, 1080)}")
     }
 
     private fun stopPipeline() {
