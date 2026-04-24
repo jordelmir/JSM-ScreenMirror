@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(\.openWindow) var openWindow
     @EnvironmentObject var engine: RuntimeOrchestrator
     @State private var isAnimatingRadar = false
     @State private var isAnimatingRec = false
@@ -353,8 +354,8 @@ struct DashboardView: View {
                             MiniButton(title: "VER GRABACIONES", icon: "folder.fill", hover: $hoverFolder) {
                                 engine.openRecordingFolder()
                             }
-                            MiniButton(title: "PANEL HUD", icon: "square.grid.2x2", hover: $hoverHud) {
-                                engine.bootEngine()
+                            MiniButton(title: "VER ANDROID", icon: "iphone", hover: $hoverHud) {
+                                openWindow(id: "androidPreview")
                             }
                         }
                     }

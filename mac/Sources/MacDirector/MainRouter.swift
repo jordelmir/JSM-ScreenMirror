@@ -114,6 +114,9 @@ class RuntimeOrchestrator: ObservableObject {
         // 3. Vincular WebRTC (Android Track) hacia Metal
         rtcController.videoSink.onFrameReceived = { [weak self] pixelBuffer in
             self?.metalCompositor?.updateAndroidStream(pixelBuffer: pixelBuffer)
+            DispatchQueue.main.async {
+                self?.rtcController.latestPixelBuffer = pixelBuffer
+            }
         }
         
         // 4. ── ICE candidates: RTC ↔ Signaling bridge ──

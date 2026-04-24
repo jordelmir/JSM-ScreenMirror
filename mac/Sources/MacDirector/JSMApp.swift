@@ -26,5 +26,12 @@ struct MacDirectorApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
+        
+        WindowGroup("Elysium Android Preview", id: "androidPreview") {
+            AndroidPreviewWindow()
+                .environmentObject(engine)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 360, height: 780)
     }
 }

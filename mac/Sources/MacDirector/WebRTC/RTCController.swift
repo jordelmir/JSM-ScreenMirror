@@ -14,6 +14,8 @@ class RTCController: NSObject, ObservableObject {
     // Estado observable de la conexión P2P
     @Published var iceConnectionState: RTCIceConnectionState = .new
     @Published var isP2PConnected = false
+    @Published var currentVideoTrack: RTCVideoTrack?
+    @Published var latestPixelBuffer: CVPixelBuffer?
     
     // DataChannel callback para metadatos del Android (fold state, orientación)
     var onDataChannelMessage: ((String) -> Void)?
@@ -114,6 +116,7 @@ extension RTCController: RTCPeerConnectionDelegate {
             print("✅ Track de video inyectado desde Android. Tracks: \(stream.videoTracks.count)")
             if let videoTrack = stream.videoTracks.first {
                 videoTrack.add(self.videoSink)
+                self.currentVideoTrack = videoTrack
             }
         }
     }
