@@ -3,6 +3,14 @@ import SwiftUI
 @main
 struct MacDirectorApp: App {
     @StateObject private var engine = RuntimeOrchestrator()
+    
+    // ═══ ANTI APP-NAP ═══
+    // macOS App Nap puede suspender la app si no está visible,
+    // matando la conexión WebRTC. Esto lo previene.
+    private let activity = ProcessInfo.processInfo.beginActivity(
+        options: [.userInitiated, .idleSystemSleepDisabled, .suddenTerminationDisabled],
+        reason: "Elysium Vanguard: WebRTC P2P streaming activo"
+    )
 
     var body: some Scene {
         WindowGroup {
@@ -32,6 +40,7 @@ struct MacDirectorApp: App {
                 .environmentObject(engine)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 360, height: 780)
+        .windowResizability(.automatic) // Permitir resize libre
+        .defaultSize(width: 480, height: 860) // Tamaño inicial más grande
     }
 }
