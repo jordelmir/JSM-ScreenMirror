@@ -68,6 +68,13 @@ struct AndroidPreviewView: NSViewRepresentable {
         let view = NSView()
         view.wantsLayer = true
         view.layer = context.coordinator.displayLayer
+        // Retina: escala nativa del display para máxima nitidez
+        if let screen = NSScreen.main {
+            context.coordinator.displayLayer.contentsScale = screen.backingScaleFactor
+        }
+        // Magnification filter para Retina: interpolación de alta calidad
+        context.coordinator.displayLayer.magnificationFilter = .trilinear
+        context.coordinator.displayLayer.minificationFilter = .trilinear
         return view
     }
     
