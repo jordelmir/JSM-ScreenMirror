@@ -20,6 +20,9 @@ struct MacDirectorApp: App {
                     }
                 }
             }
+            .onAppear {
+                engine.bootEngine()
+            }
             .onDisappear {
                 engine.shutdownEngine()
             }

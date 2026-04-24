@@ -7,9 +7,11 @@
     <!-- MediaProjection y Foreground Services -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Haptics y Background Power Management -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -31,7 +33,7 @@
 
         <service
             android:name=".webrtc.CaptureForegroundService"
-            android:foregroundServiceType="mediaProjection"
+            android:foregroundServiceType="mediaProjection|mediaPlayback"
             android:enabled="true"
             android:exported="false" />
 

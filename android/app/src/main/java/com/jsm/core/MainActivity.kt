@@ -95,7 +95,13 @@ class MainActivity : ComponentActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == RECORD_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
-            bootFullPipeline(data)
+            val serviceIntent = Intent(this, CaptureForegroundService::class.java)
+            startForegroundService(serviceIntent)
+            
+            lifecycleScope.launch {
+                kotlinx.coroutines.delay(300)
+                bootFullPipeline(data)
+            }
         } else {
             isBroadcastingState.value = false
             connectionState.value = "PERMISSION_DENIED"
@@ -535,8 +541,6 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 isBroadcasting = true
                                 nsdBroadcaster.startBroadcasting(9999)
-                                val serviceIntent = Intent(this@MainActivity, CaptureForegroundService::class.java)
-                                startForegroundService(serviceIntent)
                                 startMediaProjectionRequest()
                             }
                         },

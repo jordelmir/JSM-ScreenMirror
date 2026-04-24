@@ -28,19 +28,65 @@ class CaptureForegroundService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var silentMediaPlayer: android.media.MediaPlayer? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         acquireLocks()
+        startSilentAudioHack()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification()
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or 
+                       android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         
         // El servicio se queda corriendo para mantener ScreenCapturerHook vivo
         return START_NOT_STICKY
+    }
+
+    private var silentAudioTrack: android.media.AudioTrack? = null
+    private var isPlayingSilence = false
+
+    /**
+     * HACK DEFINITIVO PARA HONOR/HUAWEI (MagicOS / EMUI):
+     * Power Genie (PG_ash) ignora WakeLocks y ForegroundServices, congelando el Virtual Display
+     * y matando sockets a los pocos segundos de pasar al background.
+     * La única forma de evitarlo a nivel kernel es simular que somos una app de reproducción de audio activo.
+     */
+    private fun startSilentAudioHack() {
+        try {
+            val minSize = android.media.AudioTrack.getMinBufferSize(
+                44100, 
+                android.media.AudioFormat.CHANNEL_OUT_MONO, 
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+            silentAudioTrack = android.media.AudioTrack(
+                android.media.AudioManager.STREAM_MUSIC,
+                44100,
+                android.media.AudioFormat.CHANNEL_OUT_MONO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT,
+                minSize,
+                android.media.AudioTrack.MODE_STREAM
+            )
+            silentAudioTrack?.play()
+            isPlayingSilence = true
+            
+            Thread {
+                val silence = ByteArray(minSize)
+                while (isPlayingSilence && silentAudioTrack?.playState == android.media.AudioTrack.PLAYSTATE_PLAYING) {
+                    silentAudioTrack?.write(silence, 0, silence.size)
+                }
+            }.start()
+        } catch (e: Exception) {
+            // Ignorar
+        }
     }
 
     private fun acquireLocks() {
@@ -62,6 +108,10 @@ class CaptureForegroundService : Service() {
         if (wifiLock?.isHeld == true) {
             wifiLock?.release()
         }
+        isPlayingSilence = false
+        silentAudioTrack?.stop()
+        silentAudioTrack?.release()
+        silentAudioTrack = null
     }
 
     private fun buildNotification(): Notification {
