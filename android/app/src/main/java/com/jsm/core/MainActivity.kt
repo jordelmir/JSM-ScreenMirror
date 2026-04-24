@@ -185,6 +185,20 @@ class MainActivity : ComponentActivity() {
             port = 9999,
             onOfferRequested = { sendOffer ->
                 connectionState.value = "NEGOTIATING"
+                // Recrear PeerConnection para cada nueva sesión del Mac
+                // Esto garantiza que funcione incluso si el usuario está en YouTube
+                // y el Mac se reconecta automáticamente
+                rtcClient?.recreatePeerConnection()
+                
+                // Re-vincular ICE candidates al nuevo PeerConnection
+                rtcClient?.onLocalIceCandidate = { candidate ->
+                    signalingServer?.sendIceCandidate(
+                        candidate.sdp,
+                        candidate.sdpMid,
+                        candidate.sdpMLineIndex
+                    )
+                }
+                
                 rtcClient?.createOffer { sdp ->
                     sendOffer(sdp.description)
                 }

@@ -18,6 +18,7 @@ class RTCClient(
     private var peerConnection: PeerConnection? = null
     private var screenCapturerHook = ScreenCapturerHook(context)
     private var dataChannel: DataChannel? = null
+    private var savedVideoTrack: VideoTrack? = null  // Persistir para reconexiones
 
     // Callback para enviar ICE candidates al Mac via signaling
     var onLocalIceCandidate: ((IceCandidate) -> Unit)? = null
@@ -32,7 +33,7 @@ class RTCClient(
 
     private fun initPeerConnectionFactory(context: Context) {
         val options = PeerConnectionFactory.InitializationOptions.builder(context)
-            .setEnableInternalTracer(false) // Desactivar tracer en producción para rendimiento
+            .setEnableInternalTracer(false)
             .setFieldTrials(
                 "WebRTC-H264HighProfile/Enabled/" +
                 "WebRTC-H264Simulcast/Enabled/" +
@@ -49,19 +50,17 @@ class RTCClient(
             .createPeerConnectionFactory()
     }
 
-    fun startStreaming(projectionData: Intent) {
-        // Configuración LAN-first: sin servidores STUN/TURN para latencia mínima
-        val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
+    private fun buildRtcConfig(): PeerConnection.RTCConfiguration {
+        return PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             candidateNetworkPolicy = PeerConnection.CandidateNetworkPolicy.LOW_COST
-            // Mantener ICE vivo: re-gather continuamente en vez de parar
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-            // Check ICE cada 1 segundo para detección rápida de problemas
             iceCheckMinInterval = 1000
         }
+    }
 
-        // Wrapper del observer que intercepta ICE candidates
-        val wrappedObserver = object : PeerConnection.Observer {
+    private fun buildWrappedObserver(): PeerConnection.Observer {
+        return object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) {
                 Log.d(TAG, "Local ICE candidate generated: ${candidate.sdp.take(60)}...")
                 onLocalIceCandidate?.invoke(candidate)
@@ -85,10 +84,9 @@ class RTCClient(
             override fun onRenegotiationNeeded() = observer.onRenegotiationNeeded()
             override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) = observer.onAddTrack(p0, p1)
         }
+    }
 
-        peerConnection = pcFactory?.createPeerConnection(rtcConfig, wrappedObserver)
-
-        // Crear DataChannel para enviar metadatos (fold state, orientación, dimensiones)
+    private fun setupDataChannel() {
         val dcInit = DataChannel.Init().apply {
             ordered = true
             maxRetransmits = 3
@@ -105,31 +103,65 @@ class RTCClient(
             }
         })
         Log.d(TAG, "DataChannel 'jsm_meta' created")
+    }
 
-        // Añadir video track de screen capture
-        val videoTrack = screenCapturerHook.createVideoTrack(
-            pcFactory!!,
-            rootEglBase.eglBaseContext,
-            projectionData
-        )
-
-        videoTrack?.let {
+    private fun addVideoTrackAndSetBitrate() {
+        savedVideoTrack?.let {
             peerConnection?.addTrack(it, listOf("JSM_STREAM"))
-            Log.d(TAG, "Video track added to PeerConnection")
+            Log.d(TAG, "Video track re-added to PeerConnection")
             
-            // ═══ BITRATE BOOST: 8 Mbps para calidad cristalina en LAN ═══
             peerConnection?.senders?.firstOrNull { sender ->
                 sender.track()?.kind() == "video"
             }?.let { videoSender ->
                 val params = videoSender.parameters
                 if (params.encodings.isNotEmpty()) {
-                    params.encodings[0].maxBitrateBps = 8_000_000  // 8 Mbps
-                    params.encodings[0].minBitrateBps = 2_000_000  // 2 Mbps min
+                    params.encodings[0].maxBitrateBps = 8_000_000
+                    params.encodings[0].minBitrateBps = 2_000_000
                     videoSender.parameters = params
                     Log.d(TAG, "⚡ Video bitrate set: 2-8 Mbps")
                 }
             }
         }
+    }
+
+    fun startStreaming(projectionData: Intent) {
+        val rtcConfig = buildRtcConfig()
+        peerConnection = pcFactory?.createPeerConnection(rtcConfig, buildWrappedObserver())
+        setupDataChannel()
+
+        // Crear video track de screen capture (solo la primera vez)
+        savedVideoTrack = screenCapturerHook.createVideoTrack(
+            pcFactory!!,
+            rootEglBase.eglBaseContext,
+            projectionData
+        )
+        addVideoTrackAndSetBitrate()
+    }
+
+    /**
+     * ═══ RECONEXIÓN SIN REINICIAR CAPTURA ═══
+     * Cierra el PeerConnection viejo, crea uno nuevo,
+     * y re-añade el video track existente (ScreenCapturer sigue vivo).
+     * Esto permite reconexión instantánea sin pedir permiso de captura de nuevo.
+     */
+    fun recreatePeerConnection() {
+        Log.d(TAG, "♻️ Recreando PeerConnection para reconexión...")
+        
+        // Cerrar el viejo
+        try {
+            dataChannel?.close()
+            peerConnection?.close()
+            peerConnection?.dispose()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error closing old PeerConnection", e)
+        }
+        
+        // Crear uno nuevo con la misma config
+        peerConnection = pcFactory?.createPeerConnection(buildRtcConfig(), buildWrappedObserver())
+        setupDataChannel()
+        addVideoTrackAndSetBitrate()
+        
+        Log.d(TAG, "♻️ PeerConnection recreado — listo para nueva Offer")
     }
 
     fun createOffer(callback: (SessionDescription) -> Unit) {
