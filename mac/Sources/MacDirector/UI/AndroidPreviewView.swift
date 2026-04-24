@@ -22,7 +22,7 @@ struct AndroidPreviewView: NSViewRepresentable {
             
             var sampleTiming = CMSampleTimingInfo(
                 duration: .invalid,
-                presentationTimeStamp: CMTime(value: Int64(mach_absolute_time()), timescale: 1000000000), // Approximate
+                presentationTimeStamp: .invalid, // Ignore timing, display immediately
                 decodeTimeStamp: .invalid
             )
             
@@ -36,6 +36,19 @@ struct AndroidPreviewView: NSViewRepresentable {
             )
             
             if let sb = sampleBuffer {
+                // Set DisplayImmediately attachment
+                if let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true) as? [[CFString: Any]],
+                   !attachmentsArray.isEmpty {
+                    var dict = attachmentsArray[0]
+                    dict[kCMSampleAttachmentKey_DisplayImmediately] = true
+                    // CFArray properties mutability hack in Swift is annoying, easier way:
+                }
+                let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true)
+                if let attachments = attachments {
+                    let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+                    CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+                }
+
                 if displayLayer.status == .failed {
                     displayLayer.flush()
                 }

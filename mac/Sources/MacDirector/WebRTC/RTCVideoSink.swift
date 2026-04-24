@@ -18,8 +18,7 @@ class RTCVideoSink: NSObject, RTCVideoRenderer {
             onFrameReceived?(buffer.pixelBuffer)
         } else {
             // Manejo de fallback para frames en otros formatos de memoria (ej: I420)
-            // En un flujo Pro Top Mundial, forzamos el uso de Hardware acceleration simpre.
-            print("WebRTC Frame recibido en formato no-nativo (I420).")
+            print("WebRTC Frame Type: \(String(describing: type(of: frame.buffer)))")
         }
     }
     
