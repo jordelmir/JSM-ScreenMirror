@@ -2,7 +2,7 @@
 
 # ⚡ Elysium Vanguard — Screen Mirror Studio
 
-**Zero-latency P2P screen mirroring & recording between macOS and Android**
+**Low-latency P2P screen mirroring & recording between macOS and Android**
 
 [![Platform](https://img.shields.io/badge/macOS-14%2B-00E5FF?style=flat-square&logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Platform](https://img.shields.io/badge/Android-14%2B-00E676?style=flat-square&logo=android&logoColor=white)](https://developer.android.com/)
