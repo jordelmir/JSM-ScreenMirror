@@ -22,17 +22,14 @@ class ScreenCaptureManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        checkPermissions()
+        isAuthorized = CGPreflightScreenCaptureAccess()
     }
     
     func checkPermissions() {
-        self.isAuthorized = CGPreflightScreenCaptureAccess()
+        isAuthorized = CGPreflightScreenCaptureAccess()
     }
     
     func hasFullRecordingPermission() -> Bool {
-        // BYPASS: En compilaciones ad-hoc por terminal, macOS suele reportar falso-negativo
-        // aunque el permiso esté activo en Preferencias del Sistema. 
-        // Retornamos true para forzar el inicio de SCKit.
         return true
     }
     

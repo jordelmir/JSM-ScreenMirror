@@ -213,13 +213,14 @@ class RuntimeOrchestrator: ObservableObject {
     }
     
     func bootEngine() {
-        if !screenCapture.hasFullRecordingPermission() {
+        screenCapture.checkPermissions()
+
+        guard screenCapture.hasFullRecordingPermission() else {
             self.showPermissionAlert = true
-            screenCapture.openPermissionSettings()
             return
         }
 
-        Task {
+        Task { @MainActor in
             do {
                 try await screenCapture.startCapture(quality: selectedQuality.size)
                 bonjourBrowser.startDiscovery()
@@ -281,7 +282,7 @@ class RuntimeOrchestrator: ObservableObject {
     }
     
     func startRecording() {
-        if !screenCapture.hasFullRecordingPermission() {
+        guard screenCapture.hasFullRecordingPermission() else {
             self.showPermissionAlert = true
             return
         }
@@ -294,7 +295,6 @@ class RuntimeOrchestrator: ObservableObject {
             try? fileManager.createDirectory(at: targetDirectory, withIntermediateDirectories: true, attributes: nil)
         }
         
-        // Nombre legible: Elysium_2026-04-20_14-30-00_2K.mp4
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         let timestamp = dateFormatter.string(from: Date())
