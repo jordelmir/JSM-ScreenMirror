@@ -1,0 +1,19 @@
+v1.3 — Ultimate Zero-Latency Edition
+
+🔥 **The PowerGenie Hack Update**
+This release introduces a revolutionary procedural audio hack to bypass MagicOS and EMUI aggressive hibernation protocols.
+
+### 🛡️ Hardened Stability
+- **Anti-Hibernation Audio Engine:** Injects a procedural silence loop (`AudioTrack`) to fool aggressive battery managers (Power Genie) into treating the app as an active media player.
+- **MediaPlayback Foreground Flag:** Upgraded the Android service to leverage dual-privilege `mediaProjection|mediaPlayback` for maximum OS-level immunity.
+- **Synchronized Lifecycle:** Decoupled `MediaProjection` startup delays to prevent race conditions during permission grants.
+- **WakeLock & WiFiLock:** Guaranteed 24/7 P2P socket persistence across all Android vendors.
+
+### 🍏 Mac OS Integration
+- Fully automated engine boot (`.onAppear`), no manual interaction required.
+- Bypassed ad-hoc terminal `CGPreflightScreenCaptureAccess` false-negatives.
+- Delivered as a complete `.app` bundle natively injected into `/Applications`.
+
+### 📦 Assets Included
+- **ElysiumVanguard-v1.3.apk:** The hardened Android client.
+- **MacDirector-v1.3.zip:** The zero-latency Swift/Metal server.
