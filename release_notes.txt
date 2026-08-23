@@ -1,19 +1,24 @@
-v1.3 — Ultimate Zero-Latency Edition
+v1.7 — Permission Loop Fix + Signed Bundle
 
-🔥 **The PowerGenie Hack Update**
-This release introduces a revolutionary procedural audio hack to bypass MagicOS and EMUI aggressive hibernation protocols.
+### Bug Fix
+- **Fixed infinite permission loop:** `CGPreflightScreenCaptureAccess()` returns false on ad-hoc builds even with permissions granted. Now `hasFullRecordingPermission()` bypasses the false-negative directly.
+- **Removed auto-open Settings:** `bootEngine()` no longer opens System Settings automatically on every launch.
+- **Simplified `startRecording()`:** Removed unnecessary async Task wrapper that caused race conditions.
 
-### 🛡️ Hardened Stability
-- **Anti-Hibernation Audio Engine:** Injects a procedural silence loop (`AudioTrack`) to fool aggressive battery managers (Power Genie) into treating the app as an active media player.
-- **MediaPlayback Foreground Flag:** Upgraded the Android service to leverage dual-privilege `mediaProjection|mediaPlayback` for maximum OS-level immunity.
-- **Synchronized Lifecycle:** Decoupled `MediaProjection` startup delays to prevent race conditions during permission grants.
-- **WakeLock & WiFiLock:** Guaranteed 24/7 P2P socket persistence across all Android vendors.
+### macOS App Bundle
+- **Signed `.app` bundle** with ad-hoc signature and entitlements (sandbox off, JIT, audio input, unsigned memory).
+- **WebRTC.framework embedded** inside `Contents/Frameworks/` with correct `@rpath`.
+- **Info.plist** with bundle ID `com.jsm.macdirector`, screen recording and microphone usage descriptions.
+- **Entitlements:** `get-task-allow`, `allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`, `device.audio-input`.
 
-### 🍏 Mac OS Integration
-- Fully automated engine boot (`.onAppear`), no manual interaction required.
-- Bypassed ad-hoc terminal `CGPreflightScreenCaptureAccess` false-negatives.
-- Delivered as a complete `.app` bundle natively injected into `/Applications`.
+### Assets Included
+- **ElysiumVanguard-v1.7-mac.zip:** Signed macOS `.app` bundle (drag to /Applications).
+- **ElysiumVanguard-v1.7.apk:** Android sender APK.
+- **MacDirector-v1.7.zip:** Source build (swift build).
 
-### 📦 Assets Included
-- **ElysiumVanguard-v1.3.apk:** The hardened Android client.
-- **MacDirector-v1.3.zip:** The zero-latency Swift/Metal server.
+### Installation (macOS)
+1. Unzip `ElysiumVanguard-v1.7-mac.zip`
+2. Drag `Elysium Vanguard.app` to `/Applications`
+3. Right-click → Open (first launch only, Gatekeeper)
+4. Go to **System Settings → Privacy → Screen Recording** → enable **Elysium Vanguard**
+5. Launch the app — no more permission prompts

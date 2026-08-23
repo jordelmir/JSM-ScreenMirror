@@ -17,6 +17,40 @@
 
 ---
 
+## Quick Start (Pre-built Release)
+
+> No Xcode needed. Download, install, and run in 2 minutes.
+
+### macOS — `Elysium Vanguard.app`
+
+| Step | Action |
+|------|--------|
+| **1** | Download [`ElysiumVanguard-v1.7-mac.zip`](./release_assets/ElysiumVanguard-v1.7-mac.zip) |
+| **2** | Unzip → drag **Elysium Vanguard.app** to `/Applications` |
+| **3** | Right-click → **Open** (first launch only, bypasses Gatekeeper) |
+| **4** | Go to **System Settings → Privacy & Security → Screen Recording** |
+| **5** | Enable the toggle for **Elysium Vanguard** |
+| **6** | Launch the app — no more permission prompts |
+
+### Android — APK
+
+| Step | Action |
+|------|--------|
+| **1** | Download [`ElysiumVanguard-v1.7.apk`](./release_assets/ElysiumVanguard-v1.7.apk) |
+| **2** | Install on your Android device (enable "Unknown sources") |
+| **3** | Open the app → tap **LINK** to grant screen capture permission |
+
+### Pairing & Recording
+
+1. **Mac:** Launch Elysium Vanguard → click **MODO DUAL ELYSIUM**
+2. **Android:** Tap **LINK** → app auto-discovers Mac via Bonjour (same LAN)
+3. **WebRTC handshake** completes automatically (ICE trickle over TCP:9999)
+4. **Mac:** Click **INICIAR GRABACIÓN** to record composited output as MP4
+5. **Hotkeys:** `⌘⌥1/2/3` to switch Android PIP layouts
+6. **Draw** neon annotations directly on screen (baked into recording)
+
+---
+
 ## Architecture
 
 ```
@@ -31,6 +65,8 @@
 │                         │    └─────────────────────────────────┘   │  → EphemeralCanvas       │
 └─────────────────────────┘                                         └──────────────────────────┘
 ```
+
+---
 
 ## Features
 
@@ -54,50 +90,61 @@
 - **Foreground Service** — Android 14+ compliant background capture
 - **Cyberpunk UI** — Grid background, neon glow, radar animations, telemetry panel
 
-## Tech Stack
+---
 
-| Layer | macOS | Android |
-|-------|-------|---------|
-| **UI** | SwiftUI + AppKit | Jetpack Compose + Material3 |
-| **Capture** | ScreenCaptureKit (SCStream) | MediaProjection + EGL |
-| **Compositing** | Metal + Core Image | — |
-| **Recording** | AVAssetWriter (HEVC/AAC) | — |
-| **Audio** | AVAudioEngine + PCM bridging | — |
-| **WebRTC** | WebRTC.framework (M125) | io.github.webrtc-sdk:android:125.6422.07 |
-| **Signaling** | NWConnection (TCP client) | ServerSocket (TCP server) |
-| **Discovery** | NWBrowser (Bonjour) | NsdManager (mDNS) |
-| **Haptics** | NSHapticFeedbackManager | VibratorManager + Composition API |
-
-## Quick Start
+## Build from Source
 
 ### Prerequisites
 - macOS 14+ with Xcode 15+ and Swift 5.9+
 - Android Studio Hedgehog+ with API 34 SDK
 - Both devices on the same LAN
 
-### Build & Run
-
-**Android (Sender):**
-```bash
-cd android
-./gradlew assembleRelease
-# Install APK from android/app/build/outputs/apk/release/
-```
-
-**macOS (Director):**
+### macOS (Director)
 ```bash
 cd mac
 swift build -c release
-# Binary at .build/release/MacDirector
+# Binary: .build/release/MacDirector
+
+# To create a signed .app bundle:
+# 1. Copy binary to Elysium Vanguard.app/Contents/MacOS/
+# 2. Copy WebRTC.framework to Contents/Frameworks/
+# 3. Add Info.plist with bundle ID com.jsm.macdirector
+# 4. Sign: codesign --force --deep --sign - --entitlements Elysium.entitlements "Elysium Vanguard.app"
 ```
 
-### Usage
-1. Launch the Android app → tap **LINK** (grants screen capture permission)
-2. Launch the Mac app → click **MODO DUAL ELYSIUM** (auto-discovers Android via Bonjour)
-3. WebRTC handshake completes automatically (ICE trickle over TCP:9999)
-4. Click **INICIAR GRABACIÓN** to record the composited output as MP4
-5. Use `⌘⌥1/2/3` to switch Android PIP layouts
-6. Draw neon annotations directly on screen (baked into recording)
+### Android (Sender)
+```bash
+cd android
+./gradlew assembleRelease
+# APK: android/app/build/outputs/apk/release/
+```
+
+---
+
+## macOS Permissions
+
+Elysium Vanguard requires **Screen Recording** permission to capture your display.
+
+### First Launch
+1. macOS will prompt: *"Elysium Vanguard would like to record this computer's screen"*
+2. Click **Open System Settings**
+3. Enable the toggle for **Elysium Vanguard**
+4. Quit and relaunch the app
+
+### Troubleshooting Permissions
+- **"Elysium Vanguard" not in the list?** Launch the app once, then check Settings
+- **Toggle won't stick?** Remove the entry with `tccutil reset ScreenCapture com.jsm.macdirector`, then relaunch
+- **App opens Settings every time?** This was fixed in v1.7 — update to the latest release
+
+### Bundle Info
+| Property | Value |
+|----------|-------|
+| Bundle ID | `com.jsm.macdirector` |
+| Entitlements | sandbox OFF, JIT, unsigned memory, audio input |
+| Code Sign | ad-hoc (no developer account required) |
+| WebRTC | embedded in `Contents/Frameworks/` |
+
+---
 
 ## Project Structure
 
@@ -118,6 +165,7 @@ swift build -c release
 │           └── ScreenCapturerHook.kt  # MediaProjection → WebRTC
 ├── mac/
 │   ├── Package.swift
+│   ├── Elysium.entitlements
 │   └── Sources/MacDirector/
 │       ├── JSMApp.swift               # SwiftUI entry point
 │       ├── MainRouter.swift           # Central orchestrator
@@ -142,8 +190,30 @@ swift build -c release
 │       └── WebRTC/
 │           ├── RTCController.swift    # PeerConnection receiver
 │           └── RTCVideoSink.swift     # CVPixelBuffer extractor
+├── release_assets/
+│   ├── ElysiumVanguard-v1.7-mac.zip   # Signed macOS app
+│   ├── ElysiumVanguard-v1.7.apk       # Android APK
+│   └── MacDirector-v1.7.zip           # Source build
 └── README.md
 ```
+
+---
+
+## Tech Stack
+
+| Layer | macOS | Android |
+|-------|-------|---------|
+| **UI** | SwiftUI + AppKit | Jetpack Compose + Material3 |
+| **Capture** | ScreenCaptureKit (SCStream) | MediaProjection + EGL |
+| **Compositing** | Metal + Core Image | — |
+| **Recording** | AVAssetWriter (HEVC/AAC) | — |
+| **Audio** | AVAudioEngine + PCM bridging | — |
+| **WebRTC** | WebRTC.framework (M125) | io.github.webrtc-sdk:android:125.6422.07 |
+| **Signaling** | NWConnection (TCP client) | ServerSocket (TCP server) |
+| **Discovery** | NWBrowser (Bonjour) | NsdManager (mDNS) |
+| **Haptics** | NSHapticFeedbackManager | VibratorManager + Composition API |
+
+---
 
 ## Thread Safety Model
 
@@ -154,6 +224,8 @@ swift build -c release
 | `AudioMixer.systemAudioNode` | `NSLock` | SCStream Audio ↔ AVAudioEngine Render |
 | `SignalingServer.clientWriter` | `synchronized` | Accept ↔ Client Handler |
 
+---
+
 ## Signaling Protocol
 
 ```json
@@ -163,11 +235,25 @@ swift build -c release
 {"type":"ice","candidate":"...","sdpMid":"audio","sdpMLineIndex":0}
 ```
 
+---
+
 ## Security
 
 - **LAN-only** — No STUN/TURN servers, zero cloud exposure
 - **No credentials in repo** — All secrets excluded via `.gitignore`
 - **TCP_NODELAY** — Minimal signaling latency, no buffering
+
+---
+
+## Release Assets
+
+| File | Description | Size |
+|------|-------------|------|
+| [`ElysiumVanguard-v1.7-mac.zip`](./release_assets/ElysiumVanguard-v1.7-mac.zip) | Signed macOS `.app` bundle | ~13 MB |
+| [`ElysiumVanguard-v1.7.apk`](./release_assets/ElysiumVanguard-v1.7.apk) | Android APK | ~60 MB |
+| [`MacDirector-v1.7.zip`](./release_assets/MacDirector-v1.7.zip) | macOS source build | ~1.1 MB |
+
+---
 
 ## License
 
